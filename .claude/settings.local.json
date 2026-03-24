@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python3 -c \"from app.main import app; print\\(''Import OK''\\)\")",
+      "Read(//c/Users/user/miniconda3/**)",
+      "Read(//c/Users/user/Miniconda3/**)",
+      "Read(//c/Users/user/**)",
+      "Bash(ls d:eduvision-v2uploads/*.pdf)",
+      "Bash(find /d/eduvision-v2/uploads -name *.pdf)",
+      "Bash(/c/Users/user/Miniconda3/python.exe -c \":*)",
+      "Bash(git rm:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
