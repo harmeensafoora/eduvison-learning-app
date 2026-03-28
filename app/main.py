@@ -16,8 +16,9 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .ai_utils import summarize_text, detailed_summary_text
-from .auth_utils import create_access_token, create_refresh_token, decode_token, utcnow, hash_value, verify_hash
+from .auth_utils import create_access_token, create_refresh_token, decode_token, utcnow, hash_value, verify_hash, generate_csrf_token
 from .cache import init_redis, close_redis, redis_health_check
+from .csrf_middleware import CSRFProtectionMiddleware
 from .config import (
     BASE_UPLOAD_DIR,
     FRONTEND_ORIGIN,
@@ -72,6 +73,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(CSRFProtectionMiddleware)
 
 STATIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static"))
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
@@ -115,9 +117,23 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
     )
 
 
+def set_csrf_cookie(response: Response, csrf_token: str) -> None:
+    """Set CSRF token cookie for client to include in X-CSRF-Token header."""
+    response.set_cookie(
+        "eduvision_csrf",
+        csrf_token,
+        httponly=False,  # Allow JavaScript access (needed to send in header)
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        max_age=24 * 3600,  # 24 hour expiry
+        path="/",
+    )
+
+
 def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     response.delete_cookie(REFRESH_COOKIE_NAME, path="/")
+    response.delete_cookie("eduvision_csrf", path="/")
 
 
 async def get_current_user_optional(request: Request, db: AsyncSession) -> User | None:
@@ -435,7 +451,10 @@ async def auth_signup(payload: EmailSignupRequest, response: Response, db: Async
     access = create_access_token(user.id, user.email or "")
     refresh = create_refresh_token(user.id)
     await _issue_refresh_token(db, user.id, refresh)
+    csrf_token = generate_csrf_token()
+    
     set_auth_cookies(response, access, refresh)
+    set_csrf_cookie(response, csrf_token)
 
     return {
         "user": {"id": user.id, "email": user.email, "display_name": user.display_name, "avatar_url": user.avatar_url},
@@ -447,6 +466,7 @@ async def auth_signup(payload: EmailSignupRequest, response: Response, db: Async
         },
         "verified": False,
         "verify_url": verify_url,
+        "csrf_token": csrf_token,
     }
 
 
@@ -472,7 +492,10 @@ async def auth_login(payload: EmailLoginRequest, response: Response, db: AsyncSe
     access = create_access_token(user.id, user.email or "")
     refresh = create_refresh_token(user.id)
     await _issue_refresh_token(db, user.id, refresh)
+    csrf_token = generate_csrf_token()
+    
     set_auth_cookies(response, access, refresh)
+    set_csrf_cookie(response, csrf_token)
 
     verified = bool(user.email_verified_at)
     return {
@@ -485,6 +508,7 @@ async def auth_login(payload: EmailLoginRequest, response: Response, db: AsyncSe
         },
         "verified": verified,
         "can_resend_verification": not verified,
+        "csrf_token": csrf_token,
     }
 
 
