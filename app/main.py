@@ -19,6 +19,7 @@ from .ai_utils import summarize_text, detailed_summary_text
 from .auth_utils import create_access_token, create_refresh_token, decode_token, utcnow, hash_value, verify_hash, generate_csrf_token
 from .cache import init_redis, close_redis, redis_health_check
 from .csrf_middleware import CSRFProtectionMiddleware
+from .llm_pipelines import extract_concepts, generate_quiz_questions, generate_feedback
 from .config import (
     BASE_UPLOAD_DIR,
     FRONTEND_ORIGIN,
@@ -1288,6 +1289,228 @@ async def visual_image(payload: VisualQueryRequest) -> dict[str, str | None]:
     # Generate the optimized search query
     visual_payload = generate_visual_search_payload(text)
     search_query = visual_payload.get("search_query", "")
+
+
+# ==================== LLM PIPELINES ====================
+
+
+@app.post("/api/pdfs/{pdf_id}/extract-concepts")
+async def api_extract_concepts(
+    pdf_id: str,
+    title: str = "",
+    max_concepts: int = 8,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user_verified_required),
+) -> dict[str, Any]:
+    """
+    Extract learning concepts from PDF content using Azure OpenAI
+
+    Args:
+        pdf_id: Unique PDF identifier
+        title: Optional document title for context
+        max_concepts: Maximum number of concepts to extract (1-10)
+        db: Database session
+        user: Authenticated user
+
+    Returns:
+        Dict with:
+        - concepts: List of extracted concepts
+        - pdf_id: The PDF ID
+        - extraction_timestamp: ISO timestamp
+        - total_concepts: Number of concepts extracted
+
+    Raises:
+        HTTPException: 400 if invalid parameters
+        HTTPException: 400 if Azure OpenAI not configured
+        HTTPException: 500 if extraction fails
+    """
+    try:
+        # Validate parameters
+        if not 1 <= max_concepts <= 10:
+            raise HTTPException(status_code=400, detail="max_concepts must be between 1 and 10")
+
+        # Check Azure OpenAI configuration
+        if not os.getenv("AZURE_OPENAI_API_KEY"):
+            raise HTTPException(
+                status_code=400,
+                detail="Azure OpenAI not configured. Set AZURE_OPENAI_API_KEY environment variable.",
+            )
+
+        # In production, would fetch actual PDF text from database/file
+        # For now, use placeholder
+        pdf_text = f"PDF {pdf_id} content would be loaded here"
+
+        # Extract concepts using LLM
+        concepts = await extract_concepts(pdf_text, title=title, max_concepts=max_concepts)
+
+        return {
+            "concepts": concepts,
+            "pdf_id": pdf_id,
+            "extraction_timestamp": datetime.utcnow().isoformat(),
+            "total_concepts": len(concepts),
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Concept extraction failed for PDF {pdf_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to extract concepts")
+
+
+@app.post("/api/concepts/{concept_id}/generate-quiz")
+async def api_generate_quiz_questions(
+    concept_id: str,
+    concept_name: str,
+    concept_definition: str,
+    context_text: str = "",
+    num_questions: int = 3,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user_verified_required),
+) -> dict[str, Any]:
+    """
+    Generate multiple-choice quiz questions for a concept using Azure OpenAI
+
+    Args:
+        concept_id: Unique concept identifier
+        concept_name: Name of the concept
+        concept_definition: Definition/explanation of the concept
+        context_text: Optional surrounding text from document
+        num_questions: Number of questions to generate (1-5)
+        db: Database session
+        user: Authenticated user
+
+    Returns:
+        Dict with:
+        - questions: List of MCQ questions
+        - concept_id: The concept ID
+        - total_questions: Number of questions generated
+        - generation_timestamp: ISO timestamp
+
+    Raises:
+        HTTPException: 400 if invalid parameters
+        HTTPException: 400 if Azure OpenAI not configured
+        HTTPException: 500 if generation fails
+    """
+    try:
+        # Validate parameters
+        if not concept_name or len(concept_name) < 2:
+            raise HTTPException(status_code=400, detail="concept_name must be at least 2 characters")
+
+        if not concept_definition or len(concept_definition) < 10:
+            raise HTTPException(status_code=400, detail="concept_definition must be at least 10 characters")
+
+        if not 1 <= num_questions <= 5:
+            raise HTTPException(status_code=400, detail="num_questions must be between 1 and 5")
+
+        # Check Azure OpenAI configuration
+        if not os.getenv("AZURE_OPENAI_API_KEY"):
+            raise HTTPException(
+                status_code=400,
+                detail="Azure OpenAI not configured. Set AZURE_OPENAI_API_KEY environment variable.",
+            )
+
+        # Generate quiz questions using LLM
+        questions = await generate_quiz_questions(
+            concept_name=concept_name,
+            concept_definition=concept_definition,
+            context_text=context_text,
+            num_questions=num_questions,
+        )
+
+        return {
+            "questions": questions,
+            "concept_id": concept_id,
+            "total_questions": len(questions),
+            "generation_timestamp": datetime.utcnow().isoformat(),
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Quiz generation failed for concept {concept_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate quiz questions")
+
+
+@app.post("/api/quiz-responses/{response_id}/generate-feedback")
+async def api_generate_feedback(
+    response_id: str,
+    concept_name: str,
+    question_text: str,
+    user_answer: str,
+    correct_answer: str,
+    is_correct: bool,
+    explanation: str = "",
+    user_knowledge_level: str = "intermediate",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user_verified_required),
+) -> dict[str, Any]:
+    """
+    Generate personalized feedback on a quiz response using Azure OpenAI
+
+    Args:
+        response_id: Unique response identifier
+        concept_name: Concept being tested
+        question_text: The quiz question
+        user_answer: User's submitted answer
+        correct_answer: The correct answer
+        is_correct: Whether user's answer was correct
+        explanation: Question explanation from quiz data
+        user_knowledge_level: 'beginner'/'intermediate'/'advanced'
+        db: Database session
+        user: Authenticated user
+
+    Returns:
+        Dict with:
+        - feedback_text: Personalized feedback
+        - is_correct: Boolean confirmation
+        - source_citation: Reference to concept/context
+        - next_learning_steps: List of suggested topics
+        - confidence_score: Confidence in feedback quality (0.0-1.0)
+        - response_id: The response ID
+        - generation_timestamp: ISO timestamp
+
+    Raises:
+        HTTPException: 400 if invalid parameters
+        HTTPException: 400 if Azure OpenAI not configured
+        HTTPException: 500 if generation fails
+    """
+    try:
+        # Validate parameters
+        if not question_text or len(question_text) < 5:
+            raise HTTPException(status_code=400, detail="question_text required and must be at least 5 characters")
+
+        if user_knowledge_level not in ["beginner", "intermediate", "advanced"]:
+            user_knowledge_level = "intermediate"
+
+        # Check Azure OpenAI configuration
+        if not os.getenv("AZURE_OPENAI_API_KEY"):
+            raise HTTPException(
+                status_code=400,
+                detail="Azure OpenAI not configured. Set AZURE_OPENAI_API_KEY environment variable.",
+            )
+
+        # Generate feedback using LLM
+        feedback = await generate_feedback(
+            concept_name=concept_name,
+            question_text=question_text,
+            user_answer=user_answer,
+            correct_answer=correct_answer,
+            is_correct=is_correct,
+            explanation=explanation,
+            user_knowledge_level=user_knowledge_level,
+        )
+
+        return {
+            **feedback,
+            "response_id": response_id,
+            "generation_timestamp": datetime.utcnow().isoformat(),
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Feedback generation failed for response {response_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate feedback")
     
     if not search_query:
         return {"image_url": None, "error": "Could not generate search query", "search_query": ""}
