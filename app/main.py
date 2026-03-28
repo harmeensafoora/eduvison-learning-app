@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .ai_utils import summarize_text, detailed_summary_text
 from .auth_utils import create_access_token, create_refresh_token, decode_token, utcnow, hash_value, verify_hash
+from .cache import init_redis, close_redis, redis_health_check
 from .config import (
     BASE_UPLOAD_DIR,
     FRONTEND_ORIGIN,
@@ -82,6 +83,15 @@ app.mount("/files", StaticFiles(directory=BASE_UPLOAD_DIR), name="files")
 @app.on_event("startup")
 async def on_startup():
     await init_db()
+    try:
+        await init_redis()
+    except Exception as e:
+        print(f"⚠ Warning: Redis startup failed (app will continue with degraded cache): {e}")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await close_redis()
 
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
@@ -378,6 +388,25 @@ async def compute_next_steps_for_session(db: AsyncSession, user: User, session_i
         "secondary_actions": secondary,
         "estimated_minutes_remaining": max(0, estimated),
         "session_id": session_id,
+    }
+
+
+# ============================================================================
+# Health Check & Status Endpoints
+# ============================================================================
+
+
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint including Redis status.
+    Used for monitoring and readiness probes.
+    """
+    redis_ok = await redis_health_check()
+    return {
+        "status": "ok",
+        "redis": "connected" if redis_ok else "unavailable",
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 
