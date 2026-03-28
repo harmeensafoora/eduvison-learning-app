@@ -1,0 +1,1895 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EduVision - Adaptive Learning</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,600;1,9..144,300;1,9..144,400&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-out: #d4dfc3;
+      --bg-in: #ffffff;
+      --grid-line: #e5e7eb;
+      --ink: #1c1917;
+      --ink-muted: #57534e;
+      --ink-faint: #a8a29e;
+      --accent: #ffccd5;
+      --accent-hover: #ffb3c1;
+      --marquee-bg: #fef08a;
+      --indigo: #4f46e5;
+      --emerald: #10b981;
+      --rose: #fb7185;
+
+      --border-width: 1.5px;
+      --border: var(--border-width) solid var(--ink);
+      --shadow: 4px 4px 0px var(--ink);
+      --shadow-lg: 6px 6px 0px var(--ink);
+      --radius: 14px;
+      --radius-sm: 8px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { font-family: "DM Sans", sans-serif; background: var(--bg-out); color: var(--ink); overflow-x: hidden; }
+    a { color: inherit; }
+
+    ::selection { background: rgba(255, 204, 213, 0.9); }
+
+    ::-webkit-scrollbar { width: 10px; }
+    ::-webkit-scrollbar-track { background: var(--bg-out); }
+    ::-webkit-scrollbar-thumb { background: var(--ink); border-radius: 0; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--ink-muted); }
+
+    .ease { transition: transform 260ms ease-out, box-shadow 260ms ease-out, background 260ms ease-out, opacity 260ms ease-out, color 260ms ease-out; }
+    @media (prefers-reduced-motion: reduce) {
+      .ease { transition: none; }
+      * { animation: none !important; scroll-behavior: auto; }
+    }
+
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.1rem 3rem;
+      background: rgba(212, 223, 195, 0.86);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: var(--border);
+    }
+
+    .nav-logo {
+      font-family: "Fraunces", serif;
+      font-weight: 600;
+      font-size: 1.8rem;
+      letter-spacing: -0.04em;
+      text-decoration: none;
+    }
+    .nav-logo span { color: var(--ink-muted); font-style: italic; }
+
+    .nav-links { display: flex; align-items: center; gap: 0.25rem; }
+    .nav-link {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: var(--ink-muted);
+      text-decoration: none;
+      padding: 0.45rem 0.9rem;
+      border-radius: 999px;
+    }
+    .nav-link:hover { color: var(--ink); background: rgba(28, 25, 23, 0.07); }
+
+    .nav-cta {
+      margin-left: 0.5rem;
+      padding: 0.52rem 1.3rem;
+      background: var(--ink);
+      color: #fff;
+      border-radius: 999px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      text-decoration: none;
+      border: var(--border);
+      box-shadow: var(--shadow);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+    }
+    .nav-cta:hover { transform: translate(-2px, -2px); box-shadow: var(--shadow-lg); background: #44403c; }
+
+    .hero {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 8rem 3rem 5rem;
+      position: relative;
+      overflow: hidden;
+      background: var(--bg-out);
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(28, 25, 23, 0.055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(28, 25, 23, 0.055) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: -120px -120px auto -120px;
+      height: 520px;
+      background:
+        radial-gradient(closest-side, rgba(255, 204, 213, 0.55), rgba(255, 204, 213, 0) 70%),
+        radial-gradient(closest-side, rgba(79, 70, 229, 0.14), rgba(79, 70, 229, 0) 72%),
+        radial-gradient(closest-side, rgba(254, 240, 138, 0.45), rgba(254, 240, 138, 0) 70%);
+      filter: blur(2px);
+      pointer-events: none;
+      transform: rotate(-3deg);
+      opacity: 0.95;
+    }
+
+    .floaty {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .floaty .orb {
+      position: absolute;
+      width: 140px;
+      height: 140px;
+      border-radius: 999px;
+      border: 1px solid rgba(28, 25, 23, 0.12);
+      background: rgba(255, 255, 255, 0.5);
+      box-shadow: 2px 2px 0 rgba(28, 25, 23, 0.18);
+      opacity: 0.85;
+      transform: translate3d(0, 0, 0);
+      animation: orb-float 9s ease-in-out infinite;
+    }
+    .floaty .orb.o1 { top: 18%; left: 6%; animation-delay: 0.2s; }
+    .floaty .orb.o2 { top: 64%; left: 12%; width: 110px; height: 110px; animation-delay: 1.0s; opacity: 0.7; }
+    .floaty .orb.o3 { top: 26%; right: 10%; width: 170px; height: 170px; animation-delay: 0.6s; opacity: 0.75; }
+
+    @keyframes orb-float {
+      0%, 100% { transform: translateY(0px) rotate(-1deg); }
+      50% { transform: translateY(-14px) rotate(1deg); }
+    }
+
+    .hero-inner {
+      position: relative;
+      z-index: 1;
+      max-width: 1120px;
+      width: 100%;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 440px;
+      gap: 5.2rem;
+      align-items: center;
+    }
+
+    .hero-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--ink-muted);
+      border: var(--border);
+      background: rgba(255, 255, 255, 0.92);
+      border-radius: 999px;
+      padding: 0.35rem 0.9rem;
+      margin-bottom: 1.75rem;
+      box-shadow: 2px 2px 0px var(--ink);
+    }
+
+    .hero-eyebrow-dot {
+      width: 6px;
+      height: 6px;
+      background: var(--emerald);
+      border-radius: 50%;
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot { 50% { opacity: 0.62; transform: scale(0.85); } }
+
+    h1.hero-headline {
+      font-family: "Fraunces", serif;
+      font-size: clamp(3.4rem, 5.7vw, 6.4rem);
+      font-weight: 400;
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+      margin-bottom: 1.6rem;
+    }
+    h1.hero-headline em { font-style: italic; color: var(--ink-muted); }
+
+    .hero-sub {
+      font-size: 1.15rem;
+      line-height: 1.65;
+      color: var(--ink-muted);
+      max-width: 520px;
+      margin-bottom: 2.35rem;
+      font-weight: 400;
+    }
+
+    .whisper {
+      font-size: 0.84rem;
+      color: var(--ink-faint);
+      margin-top: 0.95rem;
+      line-height: 1.55;
+    }
+
+    .hero-actions { display: flex; gap: 0.8rem; flex-wrap: wrap; }
+
+    .btn-primary, .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.78rem 1.75rem;
+      border-radius: 999px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      border: var(--border);
+      box-shadow: var(--shadow);
+    }
+    .btn-primary { background: var(--ink); color: #fff; }
+    .btn-primary:hover { transform: translate(-2px, -2px); box-shadow: var(--shadow-lg); background: #44403c; }
+    .btn-secondary { background: rgba(255, 255, 255, 0.95); color: var(--ink); }
+    .btn-secondary:hover { transform: translate(-2px, -2px); box-shadow: var(--shadow-lg); background: var(--accent); }
+    .btn-primary:disabled, .btn-secondary:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: var(--shadow);
+    }
+    .btn-primary:disabled:hover, .btn-secondary:disabled:hover {
+      transform: none;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-card-wrap { position: relative; }
+    .hero-card {
+      background: rgba(255, 255, 255, 0.96);
+      border: var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-lg);
+      overflow: hidden;
+      transform: translate3d(0, 0, 0);
+      animation: float 7.5s ease-in-out infinite;
+    }
+    @keyframes float { 50% { transform: translateY(-11px); } }
+
+    .hero-card-topbar {
+      background: var(--ink);
+      padding: 0.65rem 1.1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .hc-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .hc-dot-r { background: #ff5f57; }
+    .hc-dot-y { background: #ffbd2e; }
+    .hc-dot-g { background: #28ca41; }
+    .hero-card-topbar-title {
+      margin-left: auto;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.55);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .hero-card-body { padding: 1.35rem; }
+    .hc-label {
+      font-size: 0.7rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--ink-faint);
+      margin-bottom: 0.85rem;
+    }
+
+    .hc-chat { display: grid; gap: 0.6rem; margin-bottom: 1.05rem; }
+    .bubble {
+      border: 1px solid var(--grid-line);
+      border-radius: 12px;
+      padding: 0.6rem 0.75rem;
+      font-size: 0.88rem;
+      line-height: 1.45;
+      color: var(--ink-muted);
+      background: #fff;
+    }
+    .bubble.me { background: rgba(255, 204, 213, 0.55); border-color: rgba(28, 25, 23, 0.25); color: var(--ink); }
+
+    .hc-progress-area { border-top: 1px solid var(--grid-line); padding-top: 0.95rem; }
+    .hc-progress-label { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--ink-muted); font-weight: 600; margin-bottom: 0.5rem; }
+    .hc-progress-bar { height: 6px; background: var(--grid-line); border-radius: 999px; overflow: hidden; }
+    .hc-progress-fill { height: 100%; background: var(--ink); border-radius: 999px; width: 62%; animation: grow-bar 1.5s ease-out 0.45s both; }
+    @keyframes grow-bar { from { width: 0; } to { width: 62%; } }
+
+    .hc-tip {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: var(--marquee-bg);
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(28, 25, 23, 0.1);
+      font-size: 0.82rem;
+      color: var(--ink-muted);
+      line-height: 1.5;
+    }
+
+    .hero-badge-float {
+      position: absolute;
+      background: rgba(255, 255, 255, 0.95);
+      border: var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.5rem 0.8rem;
+      font-size: 0.8rem;
+      font-weight: 700;
+      box-shadow: var(--shadow);
+      white-space: nowrap;
+    }
+    .hbf-1 { top: -1rem; right: -2rem; animation: float2 6s ease-in-out infinite; }
+    .hbf-2 { bottom: 2rem; left: -2.5rem; animation: float2 8s ease-in-out infinite 1s; }
+    @keyframes float2 { 50% { transform: translateY(-8px) rotate(1deg); } }
+
+    .marquee-strip {
+      background: var(--marquee-bg);
+      border-top: var(--border);
+      border-bottom: var(--border);
+      padding: 0.75rem 0;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .marquee-track {
+      display: inline-block;
+      animation: marquee-scroll 28s linear infinite;
+      font-size: 0.8rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--ink);
+    }
+    .marquee-track span { margin: 0 2.2rem; }
+    .marquee-track .sep { opacity: 0.28; }
+    @keyframes marquee-scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
+    .section { padding: 7rem 3rem; }
+    .section-inner { max-width: 1120px; margin: 0 auto; }
+    .section-eyebrow {
+      font-size: 0.75rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--ink-muted);
+      margin-bottom: 1.2rem;
+    }
+    .section-headline {
+      font-family: "Fraunces", serif;
+      font-size: clamp(2.2rem, 4vw, 3.6rem);
+      font-weight: 400;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+      margin-bottom: 1.1rem;
+    }
+    .section-headline em { font-style: italic; color: var(--ink-muted); }
+    .section-sub {
+      font-size: 1.08rem;
+      color: var(--ink-muted);
+      line-height: 1.65;
+      max-width: 620px;
+    }
+
+    .features-section { background: var(--bg-in); border-top: var(--border); border-bottom: var(--border); }
+    .features-header {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: end;
+      margin-bottom: 4.2rem;
+      padding-bottom: 3rem;
+      border-bottom: var(--border);
+    }
+
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.1rem;
+    }
+
+    .cardx {
+      background: #fff;
+      border: var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1.55rem 1.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cardx:hover { transform: translate(-3px, -3px); box-shadow: var(--shadow-lg); }
+    .cardx::before {
+      content: "";
+      position: absolute;
+      inset: -20px -40px auto -40px;
+      height: 90px;
+      background: radial-gradient(closest-side, rgba(255, 204, 213, 0.7), rgba(255, 204, 213, 0) 70%);
+      opacity: 0.75;
+      pointer-events: none;
+      transform: rotate(-2deg);
+    }
+
+    .cardx-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.9rem;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.25rem 0.65rem;
+      border: 1px solid rgba(28, 25, 23, 0.18);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.85);
+      font-size: 0.72rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--ink-muted);
+    }
+
+    .iconbox {
+      width: 46px;
+      height: 46px;
+      border-radius: 12px;
+      border: var(--border);
+      display: grid;
+      place-items: center;
+      box-shadow: 2px 2px 0 var(--ink);
+      background: rgba(255, 255, 255, 0.95);
+    }
+
+    .cardx h3 {
+      font-family: "Fraunces", serif;
+      font-size: 1.25rem;
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.55rem;
+    }
+    .cardx p {
+      font-size: 0.92rem;
+      line-height: 1.65;
+      color: var(--ink-muted);
+    }
+
+    .how-section { background: var(--bg-out); }
+    .how-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.2rem;
+      margin-top: 3rem;
+    }
+    .how-step {
+      background: rgba(255, 255, 255, 0.92);
+      border: var(--border);
+      border-radius: var(--radius);
+      padding: 2.1rem 1.85rem;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+    .how-step:hover { transform: translate(-3px, -3px); box-shadow: var(--shadow-lg); }
+    .how-step-bg {
+      position: absolute;
+      top: -1.5rem;
+      right: -1rem;
+      font-family: "Fraunces", serif;
+      font-size: 7.5rem;
+      font-weight: 600;
+      color: var(--grid-line);
+      line-height: 1;
+      user-select: none;
+      pointer-events: none;
+    }
+    .how-step-number {
+      width: 40px;
+      height: 40px;
+      background: var(--ink);
+      color: #fff;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 0.95rem;
+      font-weight: 800;
+      margin-bottom: 1.15rem;
+    }
+    .how-step h3 { font-family: "Fraunces", serif; font-size: 1.35rem; font-weight: 400; letter-spacing: -0.02em; margin-bottom: 0.65rem; }
+    .how-step p { font-size: 0.92rem; line-height: 1.65; color: var(--ink-muted); }
+
+    .cta-section {
+      background: var(--bg-out);
+      border-top: var(--border);
+      padding: 7.5rem 3rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .cta-section::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(28, 25, 23, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(28, 25, 23, 0.05) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+    .cta-inner { position: relative; z-index: 1; max-width: 760px; margin: 0 auto; text-align: center; }
+    .cta-headline {
+      font-family: "Fraunces", serif;
+      font-size: clamp(3rem, 6vw, 5.2rem);
+      font-weight: 400;
+      letter-spacing: -0.04em;
+      line-height: 0.95;
+      margin-bottom: 1.4rem;
+    }
+    .cta-sub { font-size: 1.08rem; color: var(--ink-muted); line-height: 1.65; margin-bottom: 2.25rem; }
+    .cta-actions { display: flex; gap: 0.85rem; justify-content: center; flex-wrap: wrap; }
+    .cta-fine { font-size: 0.84rem; color: var(--ink-faint); margin-top: 1.25rem; }
+
+    footer { background: var(--bg-in); border-top: var(--border); padding: 3rem; }
+    .footer-inner { max-width: 1120px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
+    .footer-copy { font-size: 0.85rem; color: var(--ink-faint); }
+
+    .upload-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(28, 25, 23, 0.65);
+      backdrop-filter: blur(8px);
+      z-index: 220;
+      place-items: center;
+    }
+    .upload-overlay.active { display: grid; }
+    .upload-overlay-card {
+      background: rgba(255, 255, 255, 0.96);
+      border: var(--border);
+      border-radius: var(--radius);
+      padding: 2.5rem 2.2rem;
+      text-align: center;
+      box-shadow: var(--shadow-lg);
+      max-width: 380px;
+      width: 92%;
+    }
+    .upload-spinner {
+      width: 42px;
+      height: 42px;
+      border: 3px solid var(--grid-line);
+      border-top-color: var(--ink);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 1.2rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .upload-overlay-title { font-family: "Fraunces", serif; font-size: 1.5rem; font-weight: 400; margin-bottom: 0.5rem; }
+    .upload-overlay-sub { font-size: 0.9rem; color: var(--ink-muted); line-height: 1.55; }
+
+    .sheet-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(28, 25, 23, 0.35);
+      backdrop-filter: blur(6px);
+      z-index: 240;
+      display: none;
+    }
+    .sheet-backdrop.active { display: block; }
+    .sheet {
+      position: fixed;
+      inset: 0;
+      z-index: 250;
+      display: grid;
+      place-items: center;
+      padding: 1rem;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 220ms ease-out;
+    }
+    .sheet.active { opacity: 1; pointer-events: auto; }
+    .sheet-card {
+      max-width: 720px;
+      width: 100%;
+      background: rgba(255, 255, 255, 0.96);
+      border: var(--border);
+      border-radius: 22px;
+      box-shadow: var(--shadow-lg);
+      padding: 1.35rem 1.35rem 1.2rem;
+      transform: translateY(18px) scale(0.98);
+      transition: transform 220ms ease-out;
+    }
+    .sheet.active .sheet-card { transform: translateY(0) scale(1); }
+    .sheet-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .sheet-title { font-family: "Fraunces", serif; font-size: 1.55rem; font-weight: 400; letter-spacing: -0.02em; }
+    .sheet-sub { margin-top: 0.2rem; color: var(--ink-muted); font-size: 0.92rem; line-height: 1.55; }
+    .sheet-x {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      border: 1px solid rgba(28, 25, 23, 0.18);
+      background: rgba(255, 255, 255, 0.9);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+    }
+    .sheet-x:hover { background: rgba(255, 204, 213, 0.55); border-color: rgba(28, 25, 23, 0.35); }
+
+    .sheet-row {
+      margin-top: 1.05rem;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.6rem;
+      align-items: center;
+    }
+    .sheet-input {
+      height: 44px;
+      border-radius: 14px;
+      border: 1px solid rgba(28, 25, 23, 0.22);
+      padding: 0 0.95rem;
+      outline: none;
+      font-size: 0.95rem;
+      background: #fff;
+    }
+    .sheet-input:focus { border-color: rgba(79, 70, 229, 0.55); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12); }
+    .sheet-btn {
+      height: 44px;
+      padding: 0 1.05rem;
+      border-radius: 14px;
+      border: var(--border);
+      box-shadow: var(--shadow);
+      background: var(--ink);
+      color: #fff;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .sheet-btn:hover { transform: translate(-2px, -2px); box-shadow: var(--shadow-lg); background: #44403c; }
+    .sheet-mini {
+      margin-top: 0.65rem;
+      display: flex;
+      gap: 0.6rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .sheet-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid rgba(28, 25, 23, 0.18);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.85);
+      cursor: pointer;
+      font-size: 0.86rem;
+      font-weight: 700;
+      color: var(--ink-muted);
+    }
+    .sheet-link:hover { background: rgba(255, 204, 213, 0.55); border-color: rgba(28, 25, 23, 0.35); color: var(--ink); }
+    .sheet-err { margin-top: 0.6rem; color: #9f1239; font-size: 0.86rem; }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(28px);
+      transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+    .reveal-d1 { transition-delay: 0.08s; }
+    .reveal-d2 { transition-delay: 0.16s; }
+    .reveal-d3 { transition-delay: 0.24s; }
+
+    @media (max-width: 1020px) {
+      .hero-inner { grid-template-columns: 1fr; gap: 3rem; }
+      .hero-card-wrap { max-width: 520px; }
+      .features-header { grid-template-columns: 1fr; gap: 1.6rem; }
+      .cards-grid { grid-template-columns: 1fr; }
+      .how-grid { grid-template-columns: 1fr; }
+      nav { padding: 1rem 1.5rem; }
+      .nav-links .nav-link { display: none; }
+    }
+    @media (max-width: 640px) {
+      .hero { padding: 7rem 1.5rem 4rem; }
+      .section { padding: 5.4rem 1.5rem; }
+      h1.hero-headline { font-size: 3.1rem; }
+      footer { padding: 2.2rem 1.5rem; }
+    }
+
+    body.learn-mode section:not(#learn-view),
+    body.learn-mode .marquee-strip,
+    body.learn-mode footer {
+      display: none !important;
+    }
+    body.learn-mode #learn-view { display: block !important; }
+    body.learn-mode nav { position: sticky; top: 0; z-index: 50; }
+
+    .learn-shell { max-width: 980px; margin: 0 auto; }
+    .learn-doc {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 1.25rem 0 2.5rem;
+    }
+    .learn-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.95rem 1rem;
+      border: 1px solid rgba(28, 25, 23, 0.12);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: var(--shadow-sm);
+    }
+    .learn-title {
+      font-family: "Fraunces", serif;
+      font-size: 1.85rem;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+      margin: 0.25rem 0 0;
+      line-height: 1.15;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 62vw;
+    }
+    .learn-actions { display: inline-flex; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; }
+    .learn-meta {
+      margin-top: 0.9rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      color: var(--ink-faint);
+      font-weight: 800;
+      font-size: 0.82rem;
+    }
+    .learn-chip {
+      padding: 0.22rem 0.6rem;
+      border: 1px solid rgba(28, 25, 23, 0.14);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.85);
+      font-variant-numeric: tabular-nums;
+    }
+    .learn-block {
+      margin-top: 1.25rem;
+      padding: 1.05rem 1.1rem;
+      border: 1px solid rgba(28, 25, 23, 0.10);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.90);
+      box-shadow: var(--shadow-sm);
+    }
+    .learn-h {
+      margin: 0 0 0.75rem;
+      font-size: 0.92rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      font-weight: 900;
+    }
+    .learn-summary {
+      line-height: 1.75;
+      color: var(--ink-muted);
+      font-size: 1.02rem;
+    }
+    .learn-summary h3 { margin: 1rem 0 0.35rem; font-size: 1.12rem; color: var(--ink); font-weight: 900; letter-spacing: -0.01em; }
+    .learn-summary p { margin: 0.5rem 0; }
+    .learn-summary ul { margin: 0.35rem 0 0.75rem 1.25rem; }
+    .learn-summary li { margin: 0.22rem 0; }
+    details.learn-toggle {
+      border-top: 1px solid rgba(28, 25, 23, 0.10);
+      padding-top: 0.85rem;
+      margin-top: 0.85rem;
+    }
+    details.learn-toggle:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+    details.learn-toggle summary {
+      cursor: pointer;
+      font-weight: 900;
+      color: var(--ink);
+      list-style: none;
+      outline: none;
+      font-size: 1.02rem;
+    }
+    details.learn-toggle summary::-webkit-details-marker { display:none; }
+    .learn-toggle-body { margin-top: 0.55rem; color: var(--ink-muted); font-size: 0.98rem; line-height: 1.7; }
+    .learn-empty {
+      margin-top: 1.25rem;
+      padding: 1.1rem 1rem;
+      border: 1px solid rgba(28, 25, 23, 0.12);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: var(--shadow-sm);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+  </style>
+</head>
+<body>
+
+  <input type="file" id="upload-input" accept="application/pdf" style="display:none">
+
+  <div class="upload-overlay" id="upload-overlay">
+    <div class="upload-overlay-card">
+      <div class="upload-spinner"></div>
+      <div class="upload-overlay-title">Processing your document</div>
+      <div class="upload-overlay-sub" id="upload-overlay-step">Extracting content…</div>
+    </div>
+  </div>
+
+  <div class="sheet-backdrop" id="sheet-backdrop"></div>
+  <div class="sheet" id="auth-sheet" aria-hidden="true">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div>
+          <div class="sheet-title">Sign in to continue</div>
+          <div class="sheet-sub">Sign in with email + password (or Google if enabled). If you’re new, create an account—then verify your email to upload.</div>
+        </div>
+        <button class="sheet-x ease" id="sheet-close" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="sheet-row" style="margin-top: 0.85rem;">
+        <input class="sheet-input" id="auth-email" placeholder="Email" autocomplete="email" />
+      </div>
+      <div class="sheet-row" style="margin-top: 0.65rem;">
+        <input class="sheet-input" id="auth-password" placeholder="Password (min 8 chars)" type="password" autocomplete="current-password" />
+      </div>
+
+      <div class="sheet-mini" style="margin-top: 0.85rem;">
+        <button class="sheet-btn ease" id="auth-signin">Sign in</button>
+        <button class="sheet-link ease" id="auth-signup">Create account</button>
+        <button class="sheet-link ease" id="auth-forgot">Forgot password</button>
+      </div>
+
+      <div class="sheet-mini" id="auth-unverified" style="display:none;">
+        <button class="sheet-link ease" id="auth-resend">Resend verification</button>
+        <button class="sheet-link ease" id="auth-ive-verified">I verified</button>
+      </div>
+
+      <div class="sheet-sub" id="auth-devlink" style="display:none; margin-top: 0.75rem;"></div>
+
+      <div style="margin-top: 0.95rem;" id="auth-google-wrap">
+        <div class="sheet-sub" style="margin:0 0 0.55rem;">Or</div>
+        <div id="google-btn" style="display:flex; justify-content:flex-start;"></div>
+        <div class="sheet-sub" id="google-status" style="margin-top: 0.65rem;"></div>
+      </div>
+
+      <div class="sheet-err" id="sheet-error" style="display:none;"></div>
+    </div>
+  </div>
+
+  <nav>
+    <a href="#" class="nav-logo">Edu<span>Vision</span></a>
+    <div class="nav-links">
+      <a href="#features" class="nav-link ease">Features</a>
+      <a href="#how-it-works" class="nav-link ease">How it works</a>
+      <a href="#learn-preview" class="nav-link ease">Preview</a>
+      <a href="#" class="nav-cta ease" id="nav-upload">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+        Upload PDF
+      </a>
+    </div>
+  </nav>
+
+  <section class="section" id="learn-view" style="display:none; padding-top: 7.2rem;">
+    <div class="learn-shell">
+      <div class="learn-doc" id="learn-root" style="display:none;">
+        <div class="learn-topbar">
+          <div class="learn-title" id="learn-title">Loading…</div>
+          <div class="learn-actions">
+            <a class="btn-secondary ease" id="learn-download" href="#" target="_blank" rel="noopener">Download PDF</a>
+            <a class="btn-secondary ease" id="learn-go-quiz" href="#">Quiz</a>
+            <a class="btn-primary ease" id="learn-go-details" href="#">Detailed summary</a>
+          </div>
+        </div>
+
+        <div class="learn-meta" id="learn-meta"></div>
+
+        <div class="learn-block" id="learn-summary-block">
+          <div class="learn-h">Summary</div>
+          <div class="learn-summary" id="learn-summary">—</div>
+        </div>
+
+        <div class="learn-block" id="learn-concepts-block">
+          <div class="learn-h">Concepts</div>
+          <div id="learn-concepts"></div>
+        </div>
+
+        <div class="learn-empty" id="learn-empty" style="display:none;"></div>
+      </div>
+
+      <div class="learn-doc" id="learn-quiz-root" style="display:none;">
+        <div class="learn-topbar">
+          <div class="learn-title">Quiz</div>
+          <div class="learn-actions">
+            <a class="btn-secondary ease" id="learn-back-summary-quiz" href="#">Back</a>
+            <a class="btn-secondary ease" id="learn-go-details-quiz" href="#">Detailed summary</a>
+          </div>
+        </div>
+        <div class="learn-meta" id="learn-quiz-meta"></div>
+        <div class="learn-block" id="learn-quickcheck-block">
+          <div class="learn-h">Quick Check</div>
+          <div id="learn-check"></div>
+        </div>
+        <div class="learn-block" id="learn-longquiz-block">
+          <div class="learn-h">Longer Quiz</div>
+          <div class="sheet-row" style="margin-top:0;">
+            <select class="sheet-input" id="learn-quiz-concept" style="height:44px;"></select>
+            <select class="sheet-input" id="learn-quiz-difficulty" style="height:44px;">
+              <option value="easy">Easy</option>
+              <option value="medium" selected>Medium</option>
+              <option value="hard">Hard</option>
+            </select>
+          </div>
+          <div class="sheet-mini" style="margin-top:0.75rem;">
+            <button class="sheet-btn ease" id="learn-quiz-generate" type="button">Generate</button>
+          </div>
+          <div class="learn-toggle-body" id="learn-quiz-output" style="margin-top:0.8rem;">Pick a concept, then generate a question.</div>
+        </div>
+        <div class="learn-empty" id="learn-quiz-empty" style="display:none;"></div>
+      </div>
+
+      <div class="learn-doc" id="learn-details-root" style="display:none;">
+        <div class="learn-topbar">
+          <div class="learn-title">Detailed summary</div>
+          <div class="learn-actions">
+            <a class="btn-secondary ease" id="learn-back-summary-details" href="#">Back</a>
+            <a class="btn-secondary ease" id="learn-go-quiz-details" href="#">Quiz</a>
+          </div>
+        </div>
+        <div class="learn-meta" id="learn-details-meta"></div>
+        <div class="learn-block" id="learn-detailed-block">
+          <div class="learn-h">Detailed Summary</div>
+          <div class="learn-summary" id="learn-detailed">Loading…</div>
+        </div>
+        <div class="learn-block" id="learn-translate-block">
+          <div class="learn-h">Translate</div>
+          <div class="sheet-row" style="margin-top:0;">
+            <input class="sheet-input" id="learn-translate-lang" placeholder="e.g., Hindi, Spanish" />
+            <button class="sheet-btn ease" id="learn-translate-btn" type="button">Translate</button>
+          </div>
+          <div class="learn-summary" id="learn-translate-out" style="margin-top:0.9rem;">—</div>
+        </div>
+        <div class="learn-empty" id="learn-details-empty" style="display:none;"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="hero">
+    <div class="floaty" aria-hidden="true">
+      <div class="orb o1"></div>
+      <div class="orb o2"></div>
+      <div class="orb o3"></div>
+    </div>
+
+    <div class="hero-inner">
+      <div>
+        <div class="hero-eyebrow reveal">
+          <div class="hero-eyebrow-dot"></div>
+          AI-powered adaptive learning
+        </div>
+
+        <h1 class="hero-headline reveal reveal-d1">
+          Learning that<br />
+          <em>thinks</em> like<br />
+          you do.
+        </h1>
+
+        <p class="hero-sub reveal reveal-d2">
+          Upload any document. EduVision maps it, teaches it, and adapts to how you actually learn. No setup quiz. No preferences page.
+        </p>
+
+        <div class="hero-actions reveal reveal-d3">
+          <button class="btn-primary ease" id="hero-upload">
+            <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            Try it - upload a PDF
+          </button>
+          <a href="#features" class="btn-secondary ease">
+            See what I adapt
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+          </a>
+        </div>
+
+        <p class="whisper reveal reveal-d3">Learning stays public. Uploading and starting a session is the only time I ask you to sign in.</p>
+      </div>
+
+      <div class="hero-card-wrap reveal reveal-d2" id="learn-preview">
+        <div class="hero-badge-float hbf-1">Mastery updated</div>
+        <div class="hero-card">
+          <div class="hero-card-topbar">
+            <div class="hc-dot hc-dot-r"></div>
+            <div class="hc-dot hc-dot-y"></div>
+            <div class="hc-dot hc-dot-g"></div>
+            <span class="hero-card-topbar-title">A tutor-like thread</span>
+          </div>
+          <div class="hero-card-body">
+            <div class="hc-label">A moment feels like this</div>
+            <div class="hc-chat">
+              <div class="bubble">Here's what I'd suggest next: start with the definition, then one example.</div>
+              <div class="bubble me">Okay. I think I get it, but I'm not confident.</div>
+              <div class="bubble">You're close. Focus on the mechanism that causes the result.</div>
+            </div>
+
+            <div class="hc-progress-area">
+              <div class="hc-progress-label">
+                <span>Session progress</span>
+                <span>62%</span>
+              </div>
+              <div class="hc-progress-bar"><div class="hc-progress-fill"></div></div>
+            </div>
+
+            <div class="hc-tip">If you score high twice in a row, I'll raise difficulty. If you miss twice, I'll switch to a clearer analogy.</div>
+          </div>
+        </div>
+        <div class="hero-badge-float hbf-2">Next steps ranked</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="marquee-strip" aria-hidden="true">
+    <div class="marquee-track">
+      <span>Adaptive Learning</span><span class="sep">.</span>
+      <span>Concept Mapping</span><span class="sep">.</span>
+      <span>Recall First</span><span class="sep">.</span>
+      <span>Mastery Signals</span><span class="sep">.</span>
+      <span>Next Steps</span><span class="sep">.</span>
+      <span>Adaptive Learning</span><span class="sep">.</span>
+      <span>Concept Mapping</span><span class="sep">.</span>
+      <span>Recall First</span><span class="sep">.</span>
+      <span>Mastery Signals</span><span class="sep">.</span>
+      <span>Next Steps</span><span class="sep">.</span>
+    </div>
+  </div>
+
+  <section class="section features-section" id="features">
+    <div class="section-inner">
+      <div class="features-header">
+        <div>
+          <div class="section-eyebrow reveal">Features</div>
+          <h2 class="section-headline reveal reveal-d1">A system that watches gently,<br />then <em>adapts</em> decisively.</h2>
+        </div>
+        <div>
+          <p class="section-sub reveal reveal-d2">I don't ask you your learning style. I infer it from how you move: what you reread, where you switch modality, and how your recall scores change.</p>
+          <div class="whisper reveal reveal-d3">Hover the cards. Everything should feel alive, not flashy.</div>
+        </div>
+      </div>
+
+      <div class="cards-grid">
+        <div class="cardx ease reveal">
+          <div class="cardx-top">
+            <span class="pill">Personalization</span>
+            <div class="iconbox" aria-hidden="true">
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0114 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+            </div>
+          </div>
+          <h3>Learns your style</h3>
+          <p>If you do better with visuals, I lead with the graph. If you do better with analogies, I shift to story-driven explanations. If you learn by doing, I surface practice first.</p>
+        </div>
+
+        <div class="cardx ease reveal reveal-d1">
+          <div class="cardx-top">
+            <span class="pill">Memory</span>
+            <div class="iconbox" aria-hidden="true">
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+            </div>
+          </div>
+          <h3>Remembers where you struggle</h3>
+          <p>When a concept stays below 50% twice, I flag it as close and bring it back with a gentler framing. No judgment. Just signal and repeat.</p>
+        </div>
+
+        <div class="cardx ease reveal reveal-d2">
+          <div class="cardx-top">
+            <span class="pill">Guidance</span>
+            <div class="iconbox" aria-hidden="true">
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+            </div>
+          </div>
+          <h3>Tells you what comes next</h3>
+          <p>After each moment, I rank the next step: revisit a near-miss, continue an unlocked node, or strengthen weak areas before finishing.</p>
+        </div>
+
+        <div class="cardx ease reveal">
+          <div class="cardx-top">
+            <span class="pill">Assessment</span>
+            <div class="iconbox" aria-hidden="true">
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M7 4h10a2 2 0 012 2v14l-3-2-3 2-3-2-3 2V6a2 2 0 012-2z"/></svg>
+            </div>
+          </div>
+          <h3>Adaptive quizzes</h3>
+          <p>I adjust difficulty based on recent recall: medium to hard when you're consistently strong, and down to easy when you're not.</p>
+        </div>
+
+        <div class="cardx ease reveal reveal-d1">
+          <div class="cardx-top">
+            <span class="pill">Cognitive</span>
+            <div class="iconbox" aria-hidden="true">
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3a7 7 0 00-4 12.74V21l4-2 4 2v-5.26A7 7 0 0012 3z"/></svg>
+            </div>
+          </div>
+          <h3>Cognitive load checks</h3>
+          <p>If you revisit too much or time-on-chunk spikes, I surface a small prompt to slow down and reset.</p>
+        </div>
+
+        <div class="cardx ease reveal reveal-d2">
+          <div class="cardx-top">
+            <span class="pill">Mastery</span>
+            <div class="iconbox" aria-hidden="true">
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20l9-5-9-5-9 5 9 5z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 12l9-5-9-5-9 5 9 5z"/></svg>
+            </div>
+          </div>
+          <h3>Mastery visualization</h3>
+          <p>I color concepts by where you stand: mastered, in progress, struggling, or locked until prerequisites are met.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section how-section" id="how-it-works">
+    <div class="section-inner">
+      <div class="section-eyebrow reveal">How it works</div>
+      <h2 class="section-headline reveal reveal-d1">From document to<br /><em>mastery</em>, without a dashboard.</h2>
+      <p class="section-sub reveal reveal-d2">The product should feel like a tutor. You scroll a thread of moments. Progress collapses gracefully. The graph stays grounded on the left.</p>
+
+      <div class="how-grid">
+        <div class="how-step ease reveal">
+          <div class="how-step-bg">1</div>
+          <div class="how-step-number">1</div>
+          <h3>Upload</h3>
+          <p>Drop a PDF. I extract text, summarize it, and carve it into concepts you can actually remember.</p>
+        </div>
+        <div class="how-step ease reveal reveal-d1">
+          <div class="how-step-bg">2</div>
+          <div class="how-step-number">2</div>
+          <h3>Learn in moments</h3>
+          <p>Each moment has a hook, the right modality by default, then a recall prompt. You cannot skip the score reveal.</p>
+        </div>
+        <div class="how-step ease reveal reveal-d2">
+          <div class="how-step-bg">3</div>
+          <div class="how-step-number">3</div>
+          <h3>Adapt, quietly</h3>
+          <p>Difficulty nudges via recent scores. If you're overloaded, I ask for a break. If you're cruising, I offer harder content.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-section">
+    <div class="cta-inner">
+      <div class="section-eyebrow reveal" style="margin-bottom: 1.25rem;">Get started</div>
+      <h2 class="cta-headline reveal reveal-d1">Ready to learn<br /><em>smarter?</em></h2>
+      <p class="cta-sub reveal reveal-d2">Upload your first document and I'll build a learning path that adjusts to your pace and recall.</p>
+      <div class="cta-actions reveal reveal-d3">
+        <button class="btn-primary ease" id="cta-upload">Upload a PDF</button>
+        <a class="btn-secondary ease" href="#features">See features</a>
+      </div>
+      <p class="cta-fine reveal">No pricing table. No comparison grid. Just learning.</p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footer-inner">
+      <a href="#" class="nav-logo">Edu<span>Vision</span></a>
+      <div class="footer-copy">Copyright 2026 EduVision.</div>
+    </div>
+  </footer>
+
+  <script>
+    // If something breaks, surface it (especially on /learn/* where most of the page is hidden).
+    window.addEventListener('error', (evt) => {
+      try {
+        if (!location.pathname.startsWith('/learn/')) return;
+        const el = document.getElementById('learn-empty');
+        const root = document.getElementById('learn-root');
+        const quizRoot = document.getElementById('learn-quiz-root');
+        const detailsRoot = document.getElementById('learn-details-root');
+        if (root) root.style.display = 'none';
+        if (quizRoot) quizRoot.style.display = 'none';
+        if (detailsRoot) detailsRoot.style.display = 'none';
+        if (el) {
+          el.style.display = 'block';
+          el.textContent = 'Frontend error: ' + (evt.message || 'unknown error') + '. Open DevTools Console.';
+        }
+      } catch {}
+    });
+
+    const uploadInput = document.getElementById('upload-input');
+    const uploadOverlay = document.getElementById('upload-overlay');
+    const uploadOverlayStep = document.getElementById('upload-overlay-step');
+
+    const sheet = document.getElementById('auth-sheet');
+    const sheetBackdrop = document.getElementById('sheet-backdrop');
+    const sheetClose = document.getElementById('sheet-close');
+    const sheetError = document.getElementById('sheet-error');
+    const authEmail = document.getElementById('auth-email');
+    const authPassword = document.getElementById('auth-password');
+    const authSignin = document.getElementById('auth-signin');
+    const authSignup = document.getElementById('auth-signup');
+    const authForgot = document.getElementById('auth-forgot');
+    const authUnverified = document.getElementById('auth-unverified');
+    const authResend = document.getElementById('auth-resend');
+    const authIVerified = document.getElementById('auth-ive-verified');
+    const authDevlink = document.getElementById('auth-devlink');
+    const authGoogleWrap = document.getElementById('auth-google-wrap');
+    const googleBtn = document.getElementById('google-btn');
+    const googleStatus = document.getElementById('google-status');
+
+    let pendingAction = null;
+    let googleInitPromise = null;
+    let uploadStepTimer = null;
+
+    function startUploadSteps() {
+      if (!uploadOverlayStep) return;
+      const steps = [
+        'Extracting content…',
+        'Detecting structure…',
+        'Summarizing key ideas…',
+        'Carving concepts…',
+        'Preparing quick check…',
+      ];
+      let i = 0;
+      uploadOverlayStep.textContent = steps[0];
+      if (uploadStepTimer) clearInterval(uploadStepTimer);
+      uploadStepTimer = setInterval(() => {
+        i = (i + 1) % steps.length;
+        uploadOverlayStep.textContent = steps[i];
+      }, 1100);
+    }
+
+    function stopUploadSteps() {
+      if (uploadStepTimer) clearInterval(uploadStepTimer);
+      uploadStepTimer = null;
+    }
+
+    function showError(msg) {
+      sheetError.style.display = 'block';
+      sheetError.textContent = msg;
+    }
+
+    function clearError() {
+      sheetError.style.display = 'none';
+      sheetError.textContent = '';
+    }
+
+    function openSheet() {
+      clearError();
+      authDevlink.style.display = 'none';
+      authDevlink.textContent = '';
+      authUnverified.style.display = 'none';
+      sheetBackdrop.classList.add('active');
+      sheet.classList.add('active');
+      sheet.setAttribute('aria-hidden', 'false');
+      initGoogleSignIn();
+    }
+
+    function closeSheet() {
+      sheetBackdrop.classList.remove('active');
+      sheet.classList.remove('active');
+      sheet.setAttribute('aria-hidden', 'true');
+    }
+
+    sheetBackdrop.addEventListener('click', closeSheet);
+    sheetClose.addEventListener('click', closeSheet);
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && sheet.classList.contains('active')) closeSheet();
+    });
+
+    async function getAuthState() {
+      try {
+        const res = await fetch('/auth/me', { credentials: 'include' });
+        const data = await res.json();
+        return { authenticated: !!data.authenticated, verified: !!(data.user && data.user.verified) };
+      } catch {
+        return { authenticated: false, verified: false };
+      }
+    }
+
+    async function ensureVerifiedThen(action) {
+      const st = await getAuthState();
+      if (st.authenticated && st.verified) return action();
+      pendingAction = action;
+      openSheet();
+      if (st.authenticated && !st.verified) {
+        authUnverified.style.display = 'flex';
+        showError('Your email is not verified yet.');
+      }
+    }
+
+    async function doUpload(file) {
+      uploadOverlay.classList.add('active');
+      startUploadSteps();
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('learningIntent', 'Understand the chapter');
+
+        const res = await fetch('/api/process', { method: 'POST', body: formData, credentials: 'include' });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.status === 401) {
+          uploadOverlay.classList.remove('active');
+          stopUploadSteps();
+          pendingAction = () => doUpload(file);
+          openSheet();
+          return;
+        }
+
+        if (res.status === 403 && String(data.detail || '').toLowerCase().includes('not verified')) {
+          uploadOverlay.classList.remove('active');
+          stopUploadSteps();
+          pendingAction = () => doUpload(file);
+          openSheet();
+          authUnverified.style.display = 'flex';
+          showError('Verify your email to upload and start learning.');
+          return;
+        }
+
+        if (!res.ok) throw new Error(data.error || data.detail || 'Upload failed');
+        if (!data.sessionId) throw new Error('No session ID returned');
+
+        stopUploadSteps();
+        window.location.href = '/learn/' + data.sessionId;
+      } catch (err) {
+        uploadOverlay.classList.remove('active');
+        stopUploadSteps();
+        alert('Error: ' + (err.message || 'unknown error'));
+      }
+    }
+
+    function setDevLink(label, url) {
+      if (!url) return;
+      authDevlink.style.display = 'block';
+      authDevlink.innerHTML = `${label}: <a href="${url}" target="_blank" rel="noopener">${url}</a>`;
+    }
+
+    async function fetchWithTimeout(url, options, timeoutMs) {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeoutMs || 12000);
+      try {
+        const res = await fetch(url, { ...(options || {}), signal: controller.signal });
+        return res;
+      } finally {
+        clearTimeout(t);
+      }
+    }
+
+    async function postJson(url, body) {
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(body || {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || 'Request failed');
+      return data;
+    }
+
+    async function handleAuthSuccessOrVerify(data) {
+      const verified = !!data.verified;
+      if (verified) {
+        closeSheet();
+        const action = pendingAction;
+        pendingAction = null;
+        if (action) action();
+        return;
+      }
+      authUnverified.style.display = 'flex';
+      showError('Your email is not verified yet.');
+      if (data.verify_url) setDevLink('Verify link (dev)', data.verify_url);
+    }
+
+    authSignin.addEventListener('click', async () => {
+      clearError();
+      authDevlink.style.display = 'none';
+      try {
+        const email = (authEmail.value || '').trim();
+        const password = authPassword.value || '';
+        if (!email || !password) throw new Error('Add email and password.');
+        const data = await postJson('/auth/login', { email, password });
+        await handleAuthSuccessOrVerify(data);
+      } catch (e) {
+        showError((e && e.message) ? e.message : 'Sign-in failed');
+      }
+    });
+
+    authSignup.addEventListener('click', async () => {
+      clearError();
+      authDevlink.style.display = 'none';
+      try {
+        const email = (authEmail.value || '').trim();
+        const password = authPassword.value || '';
+        if (!email || !password) throw new Error('Add email and password.');
+        const data = await postJson('/auth/signup', { email, password });
+        await handleAuthSuccessOrVerify(data);
+      } catch (e) {
+        showError((e && e.message) ? e.message : 'Sign-up failed');
+      }
+    });
+
+    authForgot.addEventListener('click', async () => {
+      clearError();
+      authDevlink.style.display = 'none';
+      try {
+        const email = (authEmail.value || '').trim();
+        if (!email) throw new Error('Add your email first.');
+        const data = await postJson('/auth/request-password-reset', { email });
+        setDevLink('Reset link (dev)', data.reset_url);
+        showError('If that email exists, a reset link is ready.');
+      } catch (e) {
+        showError((e && e.message) ? e.message : 'Reset failed');
+      }
+    });
+
+    authResend.addEventListener('click', async () => {
+      clearError();
+      authDevlink.style.display = 'none';
+      try {
+        const data = await postJson('/auth/resend-verification', {});
+        if (data.verify_url) setDevLink('Verify link (dev)', data.verify_url);
+        showError('Verification link generated.');
+      } catch (e) {
+        showError((e && e.message) ? e.message : 'Could not resend');
+      }
+    });
+
+    authIVerified.addEventListener('click', async () => {
+      clearError();
+      try {
+        const st = await getAuthState();
+        if (st.authenticated && st.verified) {
+          closeSheet();
+          const action = pendingAction;
+          pendingAction = null;
+          if (action) action();
+          return;
+        }
+        showError('Still not verified. Open the verify link and try again.');
+      } catch {
+        showError('Could not check verification status.');
+      }
+    });
+
+    authPassword.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') authSignin.click();
+    });
+
+    function triggerUpload(e) {
+      if (e) e.preventDefault();
+      uploadInput.click();
+    }
+
+    document.getElementById('nav-upload').addEventListener('click', (e) => {
+      e.preventDefault();
+      ensureVerifiedThen(() => triggerUpload());
+    });
+    document.getElementById('hero-upload').addEventListener('click', (e) => {
+      e.preventDefault();
+      ensureVerifiedThen(() => triggerUpload());
+    });
+    document.getElementById('cta-upload').addEventListener('click', (e) => {
+      e.preventDefault();
+      ensureVerifiedThen(() => triggerUpload());
+    });
+
+    uploadInput.addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      await ensureVerifiedThen(() => doUpload(file));
+      e.target.value = '';
+    });
+
+    function loadGoogleScript() {
+      return new Promise((resolve, reject) => {
+        if (window.google && window.google.accounts && window.google.accounts.id) return resolve();
+        const existing = document.querySelector('script[data-gsi]');
+        if (existing) {
+          existing.addEventListener('load', () => resolve());
+          existing.addEventListener('error', () => reject(new Error('Could not load Google sign-in')));
+          return;
+        }
+        const s = document.createElement('script');
+        s.src = 'https://accounts.google.com/gsi/client';
+        s.async = true;
+        s.defer = true;
+        s.dataset.gsi = '1';
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error('Could not load Google sign-in'));
+        document.head.appendChild(s);
+      });
+    }
+
+    async function initGoogleSignIn() {
+      if (googleInitPromise) return googleInitPromise;
+      googleInitPromise = (async () => {
+        try {
+          const res = await fetch('/auth/google-client-id', { credentials: 'include' });
+          const data = await res.json().catch(() => ({}));
+          const clientId = data.client_id || '';
+          if (!clientId) {
+            authGoogleWrap.style.display = 'none';
+            googleStatus.textContent = '';
+            return;
+          }
+
+          authGoogleWrap.style.display = 'block';
+          googleStatus.textContent = 'Loading Google sign-in…';
+
+          await loadGoogleScript();
+          if (!window.google || !window.google.accounts || !window.google.accounts.id) {
+            throw new Error('Google sign-in failed to load.');
+          }
+
+          window.google.accounts.id.initialize({
+            client_id: clientId,
+            callback: async (cred) => {
+              clearError();
+              try {
+                const idToken = cred && cred.credential;
+                if (!idToken) throw new Error('Missing Google credential');
+                const r = await fetch('/auth/google', {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ id_token: idToken })
+                });
+                const j = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(j.detail || 'Google sign-in failed');
+                closeSheet();
+                const action = pendingAction;
+                pendingAction = null;
+                if (action) action();
+              } catch (e) {
+                showError((e && e.message) ? e.message : 'Google sign-in failed');
+              }
+            }
+          });
+
+          googleBtn.innerHTML = '';
+          window.google.accounts.id.renderButton(googleBtn, {
+            theme: 'outline',
+            size: 'large',
+            shape: 'pill',
+            text: 'continue_with',
+            width: 320,
+          });
+          googleStatus.textContent = 'Continue with Google (creates an account automatically if needed).';
+        } catch (e) {
+          authGoogleWrap.style.display = 'none';
+          googleBtn.innerHTML = '';
+          googleStatus.textContent = '';
+        }
+      })();
+      return googleInitPromise;
+    }
+
+    async function initLearnViewer() {
+      if (!location.pathname.startsWith('/learn/')) return;
+      const pathParts = location.pathname.split('/').filter(Boolean);
+      const sessionId = pathParts[1] || '';
+      const view = (pathParts[2] || 'summary').toLowerCase(); // summary | quiz | details
+
+      const learnView = document.getElementById('learn-view');
+
+      const summaryRoot = document.getElementById('learn-root');
+      const quizRoot = document.getElementById('learn-quiz-root');
+      const detailsRoot = document.getElementById('learn-details-root');
+
+      const learnTitle = document.getElementById('learn-title');
+      const learnMeta = document.getElementById('learn-meta');
+      const learnEmpty = document.getElementById('learn-empty');
+      const learnSummary = document.getElementById('learn-summary');
+      const learnConcepts = document.getElementById('learn-concepts');
+      const summaryBlock = document.getElementById('learn-summary-block');
+      const conceptsBlock = document.getElementById('learn-concepts-block');
+      const downloadBtn = document.getElementById('learn-download');
+      const goQuiz = document.getElementById('learn-go-quiz');
+      const goDetails = document.getElementById('learn-go-details');
+
+      const quizEmpty = document.getElementById('learn-quiz-empty');
+      const quizMeta = document.getElementById('learn-quiz-meta');
+      const quickCheckBlock = document.getElementById('learn-quickcheck-block');
+      const longQuizBlock = document.getElementById('learn-longquiz-block');
+      const checkWrap = document.getElementById('learn-check');
+      const quizConceptSel = document.getElementById('learn-quiz-concept');
+      const quizDiffSel = document.getElementById('learn-quiz-difficulty');
+      const quizGenerateBtn = document.getElementById('learn-quiz-generate');
+      const quizOutput = document.getElementById('learn-quiz-output');
+      const backSummaryQuiz = document.getElementById('learn-back-summary-quiz');
+      const goDetailsQuiz = document.getElementById('learn-go-details-quiz');
+
+      const detailsEmpty = document.getElementById('learn-details-empty');
+      const detailsMeta = document.getElementById('learn-details-meta');
+      const detailedBlock = document.getElementById('learn-detailed-block');
+      const detailedEl = document.getElementById('learn-detailed');
+      const translateBlock = document.getElementById('learn-translate-block');
+      const translateLang = document.getElementById('learn-translate-lang');
+      const translateBtn = document.getElementById('learn-translate-btn');
+      const translateOut = document.getElementById('learn-translate-out');
+      const backSummaryDetails = document.getElementById('learn-back-summary-details');
+      const goQuizDetails = document.getElementById('learn-go-quiz-details');
+
+      function fatalDomError() {
+        document.body.classList.add('learn-mode');
+        if (learnView) learnView.style.display = 'block';
+        const msg = document.createElement('div');
+        msg.className = 'learn-empty';
+        msg.textContent = 'Learn UI failed to load (frontend mismatch). Hard refresh (Ctrl+Shift+R) and try again.';
+        if (learnView) learnView.prepend(msg);
+      }
+
+      if (!sessionId || !summaryRoot || !quizRoot || !detailsRoot) return fatalDomError();
+      if (!learnTitle || !learnMeta || !learnEmpty || !learnSummary || !learnConcepts || !summaryBlock || !conceptsBlock || !downloadBtn || !goQuiz || !goDetails) return fatalDomError();
+      if (!quizEmpty || !quizMeta || !quickCheckBlock || !longQuizBlock || !checkWrap || !quizConceptSel || !quizDiffSel || !quizGenerateBtn || !quizOutput || !backSummaryQuiz || !goDetailsQuiz) return fatalDomError();
+      if (!detailsEmpty || !detailsMeta || !detailedBlock || !detailedEl || !translateBlock || !translateLang || !translateBtn || !translateOut || !backSummaryDetails || !goQuizDetails) return fatalDomError();
+
+      document.body.classList.add('learn-mode');
+
+      function showView(which) {
+        summaryRoot.style.display = which === 'summary' ? 'block' : 'none';
+        quizRoot.style.display = which === 'quiz' ? 'block' : 'none';
+        detailsRoot.style.display = which === 'details' ? 'block' : 'none';
+      }
+
+      showView(view === 'quiz' ? 'quiz' : view === 'details' ? 'details' : 'summary');
+
+      function escapeHtml(s) {
+        return String(s)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function formatInline(text) {
+        const escaped = escapeHtml(text);
+        // Safe: we escape HTML first, then only add <strong>.
+        return escaped.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
+      }
+
+      function renderMarkdown(md) {
+        const src = String(md || '').replace(/\\r\\n/g, '\\n');
+        const lines = src.split('\\n');
+        let html = '';
+        let inList = false;
+        for (const raw of lines) {
+          const line = raw.trimEnd();
+          if (!line.trim()) {
+            if (inList) { html += '</ul>'; inList = false; }
+            continue;
+          }
+          if (line.startsWith('### ')) {
+            if (inList) { html += '</ul>'; inList = false; }
+            html += `<h3>${formatInline(line.slice(4).trim())}</h3>`;
+            continue;
+          }
+          if (line.startsWith('- ')) {
+            if (!inList) { html += '<ul>'; inList = true; }
+            html += `<li>${formatInline(line.slice(2).trim())}</li>`;
+            continue;
+          }
+          if (inList) { html += '</ul>'; inList = false; }
+          html += `<p>${formatInline(line)}</p>`;
+        }
+        if (inList) html += '</ul>';
+        return html || '<p>—</p>';
+      }
+
+      function setEmpty(msg) {
+        const safe = escapeHtml(msg);
+        const html = `<div>${safe}</div><div style="margin-top:0.85rem;"><button class="btn-secondary ease" type="button" data-learn-retry>Retry</button></div>`;
+
+        summaryBlock.style.display = 'none';
+        conceptsBlock.style.display = 'none';
+        quickCheckBlock.style.display = 'none';
+        longQuizBlock.style.display = 'none';
+        detailedBlock.style.display = 'none';
+        translateBlock.style.display = 'none';
+
+        learnEmpty.style.display = 'block';
+        learnEmpty.innerHTML = html;
+
+        quizEmpty.style.display = 'block';
+        quizEmpty.innerHTML = html;
+
+        detailsEmpty.style.display = 'block';
+        detailsEmpty.innerHTML = html;
+
+        [learnEmpty, quizEmpty, detailsEmpty].forEach((el) => {
+          const btn = el.querySelector('[data-learn-retry]');
+          if (btn) btn.onclick = () => location.reload();
+        });
+      }
+
+      function navTo(which) {
+        const base = `/learn/${encodeURIComponent(sessionId)}`;
+        if (which === 'quiz') location.href = base + '/quiz';
+        else if (which === 'details') location.href = base + '/details';
+        else location.href = base;
+      }
+
+      goQuiz.addEventListener('click', (e) => { e.preventDefault(); navTo('quiz'); });
+      goDetails.addEventListener('click', (e) => { e.preventDefault(); navTo('details'); });
+      backSummaryQuiz.addEventListener('click', (e) => { e.preventDefault(); navTo('summary'); });
+      goDetailsQuiz.addEventListener('click', (e) => { e.preventDefault(); navTo('details'); });
+      backSummaryDetails.addEventListener('click', (e) => { e.preventDefault(); navTo('summary'); });
+      goQuizDetails.addEventListener('click', (e) => { e.preventDefault(); navTo('quiz'); });
+
+      try {
+        const res = await fetchWithTimeout(`/api/session/${encodeURIComponent(sessionId)}`, { credentials: 'include' }, 12000);
+        if (res.status === 401) return setEmpty('You are signed out. Go back to the home page, sign in, then try again.');
+        if (res.status === 403) return setEmpty('Verify your email first, then refresh this page.');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const fallback = res.status >= 500 ? 'Server error while loading the session. Please retry.' : 'Session not found.';
+          return setEmpty(data.detail || fallback);
+        }
+
+        const session = data.session || {};
+        const filename = session.filename || 'Untitled';
+        const pdfUrl = session.pdf_url || '#';
+
+        // Summary view
+        learnTitle.textContent = filename;
+        learnMeta.innerHTML = '';
+        const metaChip = document.createElement('span');
+        metaChip.className = 'learn-chip';
+        metaChip.textContent = `Concepts: ${Array.isArray(session.concepts) ? session.concepts.length : 0}`;
+        learnMeta.appendChild(metaChip);
+
+        learnSummary.innerHTML = renderMarkdown((session.summary || '').trim());
+        learnConcepts.innerHTML = '';
+        const concepts = Array.isArray(session.concepts) ? session.concepts : [];
+        if (!concepts.length) {
+          learnConcepts.innerHTML = '<div class=\"learn-toggle-body\">No concepts extracted yet.</div>';
+        } else {
+          for (const c of concepts) {
+            const d = document.createElement('details');
+            d.className = 'learn-toggle';
+            const s = document.createElement('summary');
+            s.textContent = c.title || c.name || 'Concept';
+            const b = document.createElement('div');
+            b.className = 'learn-toggle-body';
+            b.textContent = (c.content || c.summary || '').trim() || '—';
+            d.appendChild(s);
+            d.appendChild(b);
+            learnConcepts.appendChild(d);
+          }
+        }
+
+        downloadBtn.href = pdfUrl;
+        summaryRoot.style.display = 'block';
+
+        // Quiz view
+        quizMeta.innerHTML = '';
+        quizMeta.appendChild(Object.assign(document.createElement('span'), { className: 'learn-chip', textContent: filename }));
+        quizConceptSel.innerHTML = '';
+        const opt0 = document.createElement('option');
+        opt0.value = '';
+        opt0.textContent = 'Select a concept…';
+        quizConceptSel.appendChild(opt0);
+        for (const c of concepts) {
+          const o = document.createElement('option');
+          o.value = c.id || '';
+          o.textContent = c.title || c.name || 'Concept';
+          quizConceptSel.appendChild(o);
+        }
+
+        quizGenerateBtn.onclick = async () => {
+          const chunkId = quizConceptSel.value;
+          const difficulty = quizDiffSel.value;
+          if (!chunkId) return;
+          quizGenerateBtn.disabled = true;
+          quizOutput.textContent = 'Generating…';
+          try {
+            const r = await fetch('/api/generate-quiz', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+              body: JSON.stringify({ chunk_id: chunkId, difficulty }),
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(j.detail || 'Failed to generate');
+            quizOutput.textContent = j.question || 'Question generated.';
+          } catch (e) {
+            quizOutput.textContent = (e && e.message) ? e.message : 'Failed to generate.';
+          } finally {
+            quizGenerateBtn.disabled = false;
+          }
+        };
+
+        if (view === 'quiz') {
+          const qres = await fetchWithTimeout(`/api/session/${encodeURIComponent(sessionId)}/check-questions`, { credentials: 'include' }, 12000);
+          const qdata = await qres.json().catch(() => ({}));
+          if (qres.ok) {
+            checkWrap.innerHTML = '';
+            const qs = Array.isArray(qdata.questions) ? qdata.questions : [];
+            for (const q of qs.slice(0, 4)) {
+              const d = document.createElement('details');
+              d.className = 'learn-toggle';
+              const s = document.createElement('summary');
+              s.textContent = q.question || 'Question';
+              const b = document.createElement('div');
+              b.className = 'learn-toggle-body';
+              b.innerHTML = `<div style=\"margin-top:.25rem;\"><strong>Answer:</strong> ${escapeHtml(q.correct_answer || '—')}</div><div style=\"margin-top:.35rem;\"><strong>Why:</strong> ${escapeHtml(q.explanation || '—')}</div>`;
+              d.appendChild(s);
+              d.appendChild(b);
+              checkWrap.appendChild(d);
+            }
+          }
+        }
+
+        // Details view
+        if (view === 'details') {
+          detailsMeta.innerHTML = '';
+          detailsMeta.appendChild(Object.assign(document.createElement('span'), { className: 'learn-chip', textContent: filename }));
+          const dres = await fetchWithTimeout(`/api/session/${encodeURIComponent(sessionId)}/detailed-summary`, { credentials: 'include' }, 25000);
+          const ddata = await dres.json().catch(() => ({}));
+          if (dres.ok) detailedEl.innerHTML = renderMarkdown((ddata.detailed_summary || '').trim());
+          else detailedEl.textContent = ddata.detail || 'Could not load detailed summary.';
+
+          translateBtn.onclick = async () => {
+            const lang = (translateLang.value || '').trim();
+            if (!lang) return;
+            translateBtn.disabled = true;
+            translateOut.textContent = 'Translating…';
+            try {
+              const tres = await fetchWithTimeout(`/api/session/${encodeURIComponent(sessionId)}/translate`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ target_language: lang }),
+              }, 30000);
+              const tdata = await tres.json().catch(() => ({}));
+              if (!tres.ok) throw new Error(tdata.detail || 'Translate failed');
+              translateOut.innerHTML = renderMarkdown((tdata.translated_text || '').trim());
+            } catch (e) {
+              translateOut.textContent = (e && e.message) ? e.message : 'Translate failed.';
+            } finally {
+              translateBtn.disabled = false;
+            }
+          };
+        }
+
+        showView(view === 'quiz' ? 'quiz' : view === 'details' ? 'details' : 'summary');
+      } catch {
+        setEmpty('Network error while loading the session.');
+      }
+    }
+
+    initLearnViewer();
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) entry.target.classList.add('visible');
+      });
+    }, { threshold: 0.14 });
+    document.querySelectorAll('.reveal').forEach((el) => observer.observe(el));
+  </script>
+</body>
+</html>
+

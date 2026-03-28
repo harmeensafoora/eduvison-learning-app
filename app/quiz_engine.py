@@ -1,432 +1,169 @@
-"""
-Quiz generation and assessment logic using Azure OpenAI.
-Automatically generates quiz questions from educational content.
-"""
+from .azure_openai_utils import azure_json
 
-import json
-from typing import List, Dict
-import uuid
-from openai import AzureOpenAI, APIConnectionError
 
-from .config import (
-    AZURE_OPENAI_API_KEY,
-    AZURE_OPENAI_ENDPOINT,
-    AZURE_OPENAI_API_VERSION,
-    AZURE_OPENAI_DEPLOYMENT,
-)
-from .models import QuizQuestion, QuestionType, DifficultyLevel
+def _fallback_question(difficulty: str, content: str, question_type: str | None) -> dict:
+    head = (content or "this concept").split(".")[0][:120]
+    qt = (question_type or "").strip().lower() or None
 
-def _get_client() -> AzureOpenAI | None:
-    if not (AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT):
-        return None
-    return AzureOpenAI(
-        api_key=AZURE_OPENAI_API_KEY,
-        api_version=AZURE_OPENAI_API_VERSION,
-        azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    if qt == "one_word":
+        return {
+            "question": f"In one word/term: {head}?",
+            "format": "one_word",
+            "options": [],
+            "correct_answer": head.split(" ")[0] if head.split(" ") else head,
+            "explanation": "Answer with a single key term from the concept.",
+        }
+    if qt == "one_sentence":
+        return {
+            "question": f"In one sentence: explain {head}.",
+            "format": "one_sentence",
+            "options": [],
+            "correct_answer": head,
+            "explanation": "Answer with exactly one sentence.",
+        }
+    if qt == "fill_blank":
+        return {
+            "question": f"Fill in the blank: {head} is ____.",
+            "format": "fill_blank",
+            "options": [],
+            "correct_answer": head.split(" ")[0] if head.split(" ") else head,
+            "explanation": "Complete the blank with the missing key term.",
+        }
+    if qt == "mcq":
+        return {
+            "question": f"Which option best matches {head}?",
+            "format": "multiple_choice",
+            "options": [head, "Unrelated claim", "Opposite claim", "Irrelevant detail"],
+            "correct_answer": head,
+            "explanation": "The first option aligns with the concept summary.",
+        }
+    if difficulty == "easy":
+        return {
+            "question": f"Which option best matches {head}?",
+            "format": "multiple_choice",
+            "options": [head, "Unrelated claim", "Opposite claim", "Irrelevant detail"],
+            "correct_answer": head,
+            "explanation": "The first option aligns with the concept summary.",
+        }
+    if difficulty == "hard":
+        return {
+            "question": f"Apply {head} to a new real-world scenario and explain your reasoning.",
+            "format": "open_ended",
+            "options": [],
+            "correct_answer": head,
+            "explanation": "A strong answer transfers the concept to unfamiliar context.",
+        }
+    return {
+        "question": f"In 2-3 lines, explain how {head} works in practice.",
+        "format": "short_answer",
+        "options": [],
+        "correct_answer": head,
+        "explanation": "A good answer should correctly apply the concept.",
+    }
+
+
+async def generate_quiz_from_content(content: str, difficulty: str, question_type: str | None = None) -> dict:
+    qt = (question_type or "").strip().lower() or None
+    fallback = _fallback_question(difficulty, content, qt)
+
+    type_rules = ""
+    if qt == "one_word":
+        type_rules = "Format: one_word. The correct_answer must be a single word/term.\n"
+    elif qt == "one_sentence":
+        type_rules = "Format: one_sentence. The correct_answer must be exactly one sentence.\n"
+    elif qt == "fill_blank":
+        type_rules = "Format: fill_blank. The question must contain exactly one blank like ____.\n"
+    elif qt == "mcq":
+        type_rules = "Format: multiple_choice. Provide exactly 4 options.\n"
+
+    prompt = f"""Generate a {difficulty} recall question for this concept: {content}
+
+easy: single fact, multiple choice, 4 options.
+medium: short answer, application of concept.
+hard: transfer question, unfamiliar context, open-ended.
+{type_rules}
+
+Return JSON only:
+{{"question":"", "format":"multiple_choice|short_answer|open_ended|one_word|one_sentence|fill_blank", "options":[], "correct_answer":"", "explanation":""}}"""
+    return await azure_json(
+        system="You produce strict JSON quiz payloads for adaptive learning.",
+        prompt=prompt,
+        fallback=fallback,
     )
 
 
-def _extract_key_points(content: str, limit: int = 8) -> List[str]:
-    """Pull short quiz-worthy statements from markdown bullets and sentences."""
-    points: List[str] = []
-
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith(("### ", "## ", "# ")):
-            continue
-        if line.startswith(("- ", "* ")):
-            candidate = line[2:].strip()
-        else:
-            candidate = line
-        if candidate and candidate not in points:
-            points.append(candidate)
-        if len(points) >= limit:
-            return points
-
-    sentences = [segment.strip() for segment in content.replace("\n", " ").split(".") if segment.strip()]
-    for sentence in sentences:
-        if sentence and sentence not in points:
-            points.append(sentence)
-        if len(points) >= limit:
-            break
-
-    return points[:limit]
-
-
-def _fallback_quiz_from_summary(
-    topic_name: str,
-    summary: str,
-    difficulty: DifficultyLevel,
-    num_questions: int,
-) -> List[QuizQuestion]:
-    """Return deterministic quiz questions when the LLM is unavailable."""
-    points = _extract_key_points(summary, limit=max(num_questions, 4))
-    if not points:
-        points = [
-            f"{topic_name} introduces foundational concepts that should be reviewed carefully.",
-            f"Understanding the main mechanism in {topic_name} helps with later recall.",
-            f"Key terminology from {topic_name} should be revised before assessment.",
-            f"Examples from {topic_name} can be used to test applied understanding.",
-        ]
-
-    questions: List[QuizQuestion] = []
-    for index in range(num_questions):
-        point = points[index % len(points)]
-        if index % 3 == 0:
-            prompt = f"Which statement best matches this study point from {topic_name}?"
-            correct = point
-            distractors = [
-                f"{topic_name} is mainly about unrelated peripheral details.",
-                "The topic can be understood without reviewing any core concepts.",
-                "Memorizing isolated terms is enough without understanding the idea.",
-            ]
-            questions.append(
-                QuizQuestion(
-                    id=f"fallback-{index + 1}",
-                    question=prompt,
-                    type=QuestionType.MULTIPLE_CHOICE,
-                    difficulty=difficulty,
-                    correct_answer=correct,
-                    options=[correct, *distractors],
-                    explanation=f"The source summary explicitly emphasizes: {point}",
-                    related_topic=topic_name,
-                    points=1,
-                )
-            )
-        elif index % 3 == 1:
-            questions.append(
-                QuizQuestion(
-                    id=f"fallback-{index + 1}",
-                    question=f"True or False: {point}",
-                    type=QuestionType.TRUE_FALSE,
-                    difficulty=difficulty,
-                    correct_answer="True",
-                    options=["True", "False"],
-                    explanation="This statement is drawn directly from the processed content.",
-                    related_topic=topic_name,
-                    points=1,
-                )
-            )
-        else:
-            lead = point.split(",")[0].split(" because ")[0].strip()
-            questions.append(
-                QuizQuestion(
-                    id=f"fallback-{index + 1}",
-                    question=f"In one short phrase, what key idea should you remember about: {lead}?",
-                    type=QuestionType.SHORT_ANSWER,
-                    difficulty=difficulty,
-                    correct_answer=lead,
-                    options=[],
-                    explanation=f"A strong answer should mention this extracted idea: {point}",
-                    related_topic=topic_name,
-                    points=1,
-                )
-            )
-
-    return questions[:num_questions]
-
-
-def generate_quiz_from_content(
-    topic_name: str,
-    summary: str,
-    detailed_text: str = "",
-    difficulty: DifficultyLevel = DifficultyLevel.INTERMEDIATE,
-    num_questions: int = 8,
-) -> List[QuizQuestion]:
-    """
-    Generate quiz questions from educational content.
-    Uses Azure OpenAI to intelligently create assessment questions.
-    """
-
-    content = f"{summary}\n\n{detailed_text}" if detailed_text else summary
-    if len(content) > 8000:
-        content = content[:8000]
-
-    prompt = f"""You are an expert educational assessment designer. Generate {num_questions} quiz questions 
-based on the provided educational material about "{topic_name}".
-
-CRITICAL REQUIREMENTS:
-- Generate EXACTLY {num_questions} questions in valid JSON format
-- Vary question types: use multiple_choice, true_false, short_answer, fill_blank
-- Difficulty level: {difficulty.value}
-- Each question must have a clear, unambiguous correct answer
-- Provide 4 options for multiple choice questions
-- Each question must include an explanation
-
-Return ONLY valid JSON (no markdown, no extra text) in this exact format:
-{{
-  "questions": [
-    {{
-      "id": "q1",
-      "question": "Question text?",
-      "type": "multiple_choice",
-      "difficulty": "{difficulty.value}",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correct_answer": "Option A",
-      "explanation": "Explanation of the correct answer",
-      "points": 1
-    }},
-    {{
-      "id": "q2",
-      "question": "True or False: Statement here?",
-      "type": "true_false",
-      "difficulty": "{difficulty.value}",
-      "options": ["True", "False"],
-      "correct_answer": "True",
-      "explanation": "Explanation",
-      "points": 1
-    }},
-    {{
-      "id": "q3",
-      "question": "Short answer: What is _____?",
-      "type": "short_answer",
-      "difficulty": "{difficulty.value}",
-      "options": [],
-      "correct_answer": "expected answer",
-      "explanation": "Why this is correct",
-      "points": 2
-    }},
-    {{
-      "id": "q4",
-      "question": "Fill in the blank: The _____ is responsible for...",
-      "type": "fill_blank",
-      "difficulty": "{difficulty.value}",
-      "options": [],
-      "correct_answer": "correct_term",
-      "explanation": "Explanation",
-      "points": 1
-    }}
-  ]
-}}
-
-EDUCATIONAL MATERIAL:
-{content}
-
-Generate the questions now. Return ONLY the JSON object, nothing else."""
-
-    client = _get_client()
-    if client is None:
-        return _fallback_quiz_from_summary(topic_name, summary, difficulty, num_questions)
-
-    try:
-        resp = client.chat.completions.create(
-            model=AZURE_OPENAI_DEPLOYMENT,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=3000,
-        )
-
-        response_text = resp.choices[0].message.content.strip()
-
-        # Extract JSON from response
-        try:
-            data = json.loads(response_text)
-            questions = []
-
-            for q_data in data.get("questions", []):
-                question = QuizQuestion(
-                    id=q_data.get("id", f"q{uuid.uuid4().hex[:8]}"),
-                    question=q_data.get("question", ""),
-                    type=QuestionType(q_data.get("type", "multiple_choice")),
-                    difficulty=DifficultyLevel(q_data.get("difficulty", difficulty.value)),
-                    correct_answer=q_data.get("correct_answer", ""),
-                    options=q_data.get("options", []),
-                    explanation=q_data.get("explanation", ""),
-                    related_topic=topic_name,
-                    points=q_data.get("points", 1),
-                )
-                questions.append(question)
-
-            if questions:
-                return questions[:num_questions]  # Ensure we don't exceed requested count
-            return _fallback_quiz_from_summary(topic_name, summary, difficulty, num_questions)
-
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse quiz JSON: {e}")
-            print(f"Response: {response_text[:500]}")
-            return _fallback_quiz_from_summary(topic_name, summary, difficulty, num_questions)
-
-    except APIConnectionError as e:
-        print(f"Azure OpenAI connection error in generate_quiz_from_content: {e}")
-        return _fallback_quiz_from_summary(topic_name, summary, difficulty, num_questions)
-    except Exception as e:
-        print(f"Unexpected error in generate_quiz_from_content: {e}")
-        return _fallback_quiz_from_summary(topic_name, summary, difficulty, num_questions)
-
-
-def generate_knowledge_gap_assessment(
-    topic_name: str,
-    summary: str,
-) -> List[QuizQuestion]:
-    """
-    Generate diagnostic assessment questions to identify knowledge gaps.
-    These questions are designed to uncover misconceptions and weak areas.
-    """
-
-    if len(summary) > 6000:
-        summary = summary[:6000]
-
-    prompt = f"""You are a diagnostic assessment expert. Create 5 diagnostic questions to identify 
-knowledge gaps and misconceptions about "{topic_name}".
-
-These questions should:
-- Target common misconceptions in this topic
-- Reveal incomplete understanding
-- Be at BEGINNER difficulty level
-- Have plausible distractors that represent common mistakes
-
-Return ONLY valid JSON (no markdown):
-{{
-  "questions": [
-    {{
-      "id": "d1",
-      "question": "Which of the following is INCORRECT?",
-      "type": "multiple_choice",
-      "difficulty": "beginner",
-      "options": ["Correct statement", "Common misconception", "Another misconception", "Another wrong answer"],
-      "correct_answer": "Common misconception",
-      "explanation": "The correct understanding is...",
-      "points": 1
-    }}
-  ]
-}}
-
-TOPIC CONTENT:
-{summary}
-
-Generate now. Return ONLY JSON."""
-
-    client = _get_client()
-    if client is None:
-        return []
-
-    try:
-        resp = client.chat.completions.create(
-            model=AZURE_OPENAI_DEPLOYMENT,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5,
-            max_tokens=1500,
-        )
-
-        response_text = resp.choices[0].message.content.strip()
-        data = json.loads(response_text)
-        questions = []
-
-        for q_data in data.get("questions", []):
-            question = QuizQuestion(
-                id=q_data.get("id", f"d{uuid.uuid4().hex[:8]}"),
-                question=q_data.get("question", ""),
-                type=QuestionType(q_data.get("type", "multiple_choice")),
-                difficulty=DifficultyLevel.BEGINNER,
-                correct_answer=q_data.get("correct_answer", ""),
-                options=q_data.get("options", []),
-                explanation=q_data.get("explanation", ""),
-                related_topic=topic_name,
-                points=1,
-            )
-            questions.append(question)
-
-        return questions
-
-    except Exception as e:
-        print(f"Error in generate_knowledge_gap_assessment: {e}")
-        return []
-
-
-def evaluate_answer(
-    question: QuizQuestion,
-    user_answer: str,
-    is_multiple_choice: bool = True,
-) -> Dict:
-    """
-    Evaluate a user's answer (with AI assistance for short answers).
-    Returns score and feedback.
-    """
-
-    if question.type == QuestionType.MULTIPLE_CHOICE or question.type == QuestionType.TRUE_FALSE:
-        is_correct = user_answer.strip().lower() == question.correct_answer.strip().lower()
-        score = question.points if is_correct else 0
-
-        return {
-            "is_correct": is_correct,
-            "score": score,
-            "explanation": question.explanation,
-            "correct_answer": question.correct_answer,
-        }
-
-    elif question.type in [QuestionType.SHORT_ANSWER, QuestionType.FILL_BLANK]:
-        # Use AI for fuzzy matching on short answers
-        if not AZURE_OPENAI_API_KEY or not AZURE_OPENAI_ENDPOINT:
-            # Fallback: exact match
-            is_correct = user_answer.strip().lower() == question.correct_answer.strip().lower()
-            score = question.points if is_correct else 0
-            return {
-                "is_correct": is_correct,
-                "score": score,
-                "explanation": question.explanation,
-                "correct_answer": question.correct_answer,
-            }
-
-        prompt = f"""Evaluate if the student's answer is correct for this question.
-
-Question: {question.question}
-Expected Answer: {question.correct_answer}
-Student's Answer: {user_answer}
-
-Consider:
-- Exact matches (100% correct)
-- Paraphrasing (75% credit)
-- Partially correct (50% credit)
-- Incorrect (0% credit)
-
-Return ONLY JSON:
-{{
-  "is_correct": true/false,
-  "score_percentage": 0-100,
-  "feedback": "Brief feedback"
-}}"""
-
-        try:
-            eval_client = _get_client()
-            if eval_client is None:
-                raise Exception("Azure OpenAI not configured")
-            resp = eval_client.chat.completions.create(
-                model=AZURE_OPENAI_DEPLOYMENT,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-                max_tokens=300,
-            )
-
-            response_text = resp.choices[0].message.content.strip()
-            data = json.loads(response_text)
-
-            score = int(question.points * (data.get("score_percentage", 0) / 100))
-
-            return {
-                "is_correct": data.get("is_correct", False),
-                "score": score,
-                "explanation": question.explanation,
-                "correct_answer": question.correct_answer,
-                "feedback": data.get("feedback", ""),
-            }
-
-        except Exception as e:
-            print(f"Error evaluating short answer: {e}")
-            # Fallback
-            is_correct = user_answer.strip().lower() == question.correct_answer.strip().lower()
-            score = question.points if is_correct else 0
-            return {
-                "is_correct": is_correct,
-                "score": score,
-                "explanation": question.explanation,
-                "correct_answer": question.correct_answer,
-            }
-
-    return {
-        "is_correct": False,
-        "score": 0,
-        "explanation": question.explanation,
-        "correct_answer": question.correct_answer,
+async def evaluate_answer(question_payload: dict, user_answer: str) -> dict:
+    correct = question_payload.get("correct_answer", "")
+    fallback_score = 100 if user_answer.strip().lower() == str(correct).strip().lower() else 40
+    fallback = {
+        "score": fallback_score,
+        "feedback": "Your answer is on track." if fallback_score >= 80 else "You are close. Focus on the core definition and one application.",
+        "misconceptions": [] if fallback_score >= 80 else ["Core mechanism not clearly stated."],
     }
+    prompt = f"""Evaluate a learner response.
+Question: {question_payload.get('question','')}
+Expected answer: {correct}
+Learner answer: {user_answer}
+
+Return JSON only: {{"score":0-100, "feedback":"first-person supportive feedback", "misconceptions":["..."]}}"""
+    return await azure_json(
+        system="You are a rigorous tutor. Score fairly and explain briefly.",
+        prompt=prompt,
+        fallback=fallback,
+    )
+
+
+def _fallback_check_questions(summary: str, n: int) -> list[dict]:
+    lines = [ln.strip() for ln in (summary or "").splitlines() if ln.strip()]
+    heads = [ln[4:].strip() for ln in lines if ln.startswith("### ")][: max(1, n)]
+    out = []
+    for i, h in enumerate(heads[:n]):
+        out.append(
+            {
+                "id": f"q{i+1}",
+                "question": f"What is the key idea of “{h}”?",
+                "format": "short_answer",
+                "options": [],
+                "correct_answer": h,
+                "explanation": "Explain the concept in your own words using one example.",
+            }
+        )
+    if not out:
+        out = [
+            {
+                "id": "q1",
+                "question": "What is the main takeaway from the summary?",
+                "format": "short_answer",
+                "options": [],
+                "correct_answer": "Main takeaway",
+                "explanation": "Summarize in 2–3 lines.",
+            }
+        ]
+    return out
+
+
+async def generate_check_questions_from_summary(summary_markdown: str, n: int = 3) -> list[dict]:
+    fallback = _fallback_check_questions(summary_markdown, n)
+    prompt = f"""Create {n} short check questions based on this study summary.
+
+Rules:
+- Questions must be answerable from the summary.
+- Mix formats: multiple_choice and short_answer.
+- For multiple_choice, provide 4 options and mark the correct_answer exactly.
+- Keep questions concise.
+
+Return JSON only with shape:
+{{"questions":[{{"id":"q1","question":"","format":"multiple_choice|short_answer","options":["","", "", ""],"correct_answer":"","explanation":""}}]}}
+
+Summary:
+{summary_markdown}
+"""
+    data = await azure_json(
+        system="You generate quick comprehension checks for learning. Output strict JSON.",
+        prompt=prompt,
+        fallback={"questions": fallback},
+    )
+    qs = data.get("questions") if isinstance(data, dict) else None
+    if isinstance(qs, list) and qs:
+        return qs[: max(1, n)]
+    return fallback

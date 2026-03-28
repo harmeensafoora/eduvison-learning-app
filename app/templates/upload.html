@@ -1,0 +1,89 @@
+{% extends "layout.html" %}
+{% block title %}Upload — EduVision{% endblock %}
+
+{% block content %}
+  <section style="padding:2.5rem 0 3.5rem;">
+    <div class="container">
+      <div class="reveal">
+        <div style="font-weight:900; font-size:1.6rem; letter-spacing:-0.03em;">Upload & process</div>
+        <div class="muted" style="margin-top:.5rem; font-size:.95rem; line-height:1.6;">Magical feedback, always. No waiting in silence.</div>
+      </div>
+
+      <div class="grid" style="grid-template-columns: 1.1fr 0.9fr; gap:1.25rem; margin-top:1.5rem;">
+        <div class="card reveal">
+          <div class="card-inner">
+            <div class="dropzone" data-dropzone>
+              <div style="font-size:1.45rem; font-weight:900;">📄 Drop your PDF here</div>
+              <div class="muted" style="margin-top:.35rem;">or click to browse • up to 50MB</div>
+              <input data-file type="file" accept="application/pdf" style="display:none;" />
+            </div>
+
+            <div class="card" data-file-card style="display:none; margin-top:1rem;">
+              <div class="card-inner" style="display:flex; justify-content:space-between; gap:1rem; align-items:center;">
+                <div>
+                  <div style="font-weight:900;" data-file-name>—</div>
+                  <div class="muted" style="margin-top:.25rem;">✓ Uploaded</div>
+                </div>
+                <button class="btn btn-danger btn-sm" data-ripple data-file-remove type="button">Remove</button>
+              </div>
+            </div>
+
+            <div style="margin-top:1.5rem; display:grid; gap:1rem;">
+              <div class="field">
+                <label class="label" for="learning_intent">What are you trying to do?</label>
+                <input class="input input-soft" id="learning_intent" name="learning_intent" placeholder="Understand the chapter" />
+                <div class="help">This helps EduVision tune explanations and quiz style.</div>
+              </div>
+            </div>
+
+            <div style="margin-top:1.5rem;">
+              <button class="btn btn-primary btn-lg" data-ripple data-process type="button" disabled>Process document</button>
+            </div>
+
+            <div class="processing" data-processing style="margin-top:1.5rem;">
+              <div class="card">
+                <div class="card-inner">
+                  <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+                    <div style="font-weight:900;">🧠 <span data-step-text>Analyzing your content…</span> <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span></div>
+                    <div class="badge"><span data-progress-pct>0%</span></div>
+                  </div>
+                  <div class="progressbar" style="margin-top:1rem;"><div data-progress-fill></div></div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-inner">
+                  <div style="font-weight:900;">Steps completed</div>
+                  <div data-steps style="display:grid; gap:.35rem; margin-top:.65rem;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid" style="gap:1rem;">
+          <div class="card reveal">
+            <div class="card-inner">
+              <div style="font-weight:900;">Processing options</div>
+              <div class="muted" style="margin-top:.25rem;">(Coming soon) Choose what EduVision generates.</div>
+              <div style="margin-top:.85rem; display:grid; gap:.55rem;">
+                <label class="side-item" style="cursor:not-allowed; opacity:.7;"><span style="font-weight:800;">Generate summary</span><span class="badge">Default</span></label>
+                <label class="side-item" style="cursor:not-allowed; opacity:.7;"><span style="font-weight:800;">Create visual map</span><span class="badge">Soon</span></label>
+                <label class="side-item" style="cursor:not-allowed; opacity:.7;"><span style="font-weight:800;">Generate quiz</span><span class="badge">Default</span></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="card reveal">
+            <div class="card-inner">
+              <div style="font-weight:900;">Tips</div>
+              <div class="muted" style="margin-top:.35rem; line-height:1.6;">
+                Bigger PDFs take longer to extract. You’ll always see what EduVision is doing—no mystery spinners.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+{% endblock %}

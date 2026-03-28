@@ -15,6 +15,11 @@ def save_upload(filename: str, contents: bytes) -> str:
         f.write(contents)
     return path
 
+def get_page_count(pdf_path: str) -> int:
+    """Return the number of pages in the PDF."""
+    reader = PdfReader(pdf_path)
+    return len(reader.pages)
+
 def extract_text(pdf_path: str) -> str:
     """Extract text from all pages of the PDF."""
     reader = PdfReader(pdf_path)

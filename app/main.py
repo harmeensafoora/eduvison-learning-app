@@ -1,174 +1,221 @@
-from fastapi import FastAPI, UploadFile, File, Body, Form
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
-
-import uuid
+import json
 import os
-import re
-from datetime import datetime
-from pydantic import BaseModel
-from typing import Optional, List, Dict
+import uuid
+import secrets
+import hashlib
+from datetime import datetime, timezone, timedelta
+from typing import Any
 
-from .config import BASE_UPLOAD_DIR, IMAGE_OUTPUT_DIR, ORGAN_IMAGE_DIR
+import httpx
+from fastapi import FastAPI, UploadFile, File, Form, Depends, Request, Response, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import select, func, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .ai_utils import summarize_text, detailed_summary_text
+from .auth_utils import create_access_token, create_refresh_token, decode_token, utcnow, hash_value, verify_hash
+from .config import (
+    BASE_UPLOAD_DIR,
+    FRONTEND_ORIGIN,
+    COOKIE_SECURE,
+    SESSION_COOKIE_NAME,
+    REFRESH_COOKIE_NAME,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    REFRESH_TOKEN_EXPIRE_DAYS,
+    APP_PUBLIC_URL,
+    GOOGLE_CLIENT_ID,
+)
+from .database import get_db, init_db
+from .db_models import (
+    User,
+    UserProfile,
+    LearningSession,
+    Concept,
+    LearningEvent,
+    QuizAttempt,
+    TopicProgress,
+    RefreshToken,
+    EmailToken,
+)
 from .pdf_utils import save_upload, extract_text, extract_images
-from .ai_utils import (
-    summarize_text,
-    translate_summary,
-    generate_detailed_text,
-    generate_references,
-    identify_organ,
-    get_static_organ_image,
-    identify_organ_with_static_image,
+from .quiz_engine import generate_quiz_from_content, evaluate_answer, generate_check_questions_from_summary
+from .visual_query import generate_visual_search_payload
+from .image_search import fetch_first_image
+from .schemas import (
+    GoogleAuthRequest,
+    EmailSignupRequest,
+    EmailLoginRequest,
+    RequestResetRequest,
+    ResetPasswordRequest,
+    ChangePasswordRequest,
+    TranslateRequest,
+    TrackEventRequest,
+    InferProfileRequest,
+    GenerateQuizRequest,
+    SubmitQuizRequest,
+    NextStepsRequest,
+    CognitiveStatusRequest,
+    VisualQueryRequest,
 )
-from .ai.concept_extractor import extract_concepts as ai_extract_concepts
-from .ai.confusion_detector import detect_confusion_points as ai_detect_confusion_points
-from .ai.explanation_generator import generate_explanations as ai_generate_explanations
-from .ai.quiz_generator import create_quiz as ai_create_quiz
-from .analytics.user_tracking import EVENT_LOG, track_event as analytics_track_event
-from .analytics.engagement_metrics import summarize_engagement
-from .models import (
-    Topic, TopicProgress, LearnerProfile, QuizQuestion, QuizAttempt,
-    DifficultyLevel, QuestionType
-)
-from .quiz_engine import generate_quiz_from_content, generate_knowledge_gap_assessment, evaluate_answer
-from .learning_analytics import LearningAnalytics
 
-# Initialize FastAPI with enhanced learning features
-app = FastAPI(title="EduVision - Medical Learning Platform")
+app = FastAPI(title="EduVision - Adaptive Learning Platform")
 
-# Setup CORS middleware
+allow_origins = ["*"] if FRONTEND_ORIGIN == "*" else [FRONTEND_ORIGIN]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount static file directories
-app.mount("/files", StaticFiles(directory=BASE_UPLOAD_DIR), name="files")
-app.mount("/diagrams", StaticFiles(directory=IMAGE_OUTPUT_DIR), name="diagrams")
-app.mount("/organs", StaticFiles(directory=ORGAN_IMAGE_DIR), name="organs")
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
-INDEX_HTML_PATH = os.path.join(PROJECT_ROOT, "index.html")
-STATIC_DIR = os.path.join(PROJECT_ROOT, "static")
+STATIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static"))
+templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/files", StaticFiles(directory=BASE_UPLOAD_DIR), name="files")
 
 
-# --- Pydantic Models for API Request Bodies ---
-class QuizAnswerSubmission(BaseModel):
-    question_id: str
-    answer: str
-    time_taken_seconds: int = 0
+@app.on_event("startup")
+async def on_startup():
+    await init_db()
 
 
-class NoteData(BaseModel):
-    topic_id: str
-    text: str
-    position: Optional[int] = None
+def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        access_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        refresh_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600,
+        path="/",
+    )
 
 
-class BookmarkData(BaseModel):
-    topic_id: str
-    content: str
-    position: int = 0
+def clear_auth_cookies(response: Response) -> None:
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    response.delete_cookie(REFRESH_COOKIE_NAME, path="/")
 
 
-class SessionRequest(BaseModel):
-    session_id: str
+async def get_current_user_optional(request: Request, db: AsyncSession) -> User | None:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        return None
+    payload = decode_token(token)
+    if not payload or payload.get("type") != "access":
+        return None
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+    return await db.get(User, user_id)
 
 
-class GraphRequest(BaseModel):
-    session_id: Optional[str] = None
-    concepts: Optional[List[Dict]] = None
+async def get_current_user_required(request: Request, db: AsyncSession) -> User:
+    user = await get_current_user_optional(request, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
 
 
-class ConfusionRequest(BaseModel):
-    session_id: Optional[str] = None
-    concepts: Optional[List[Dict]] = None
+async def get_current_user_verified_required(request: Request, db: AsyncSession) -> User:
+    user = await get_current_user_required(request, db)
+    if not user.email_verified_at:
+        raise HTTPException(status_code=403, detail="Email not verified")
+    return user
 
 
-class ExplanationRequest(BaseModel):
-    session_id: Optional[str] = None
-    concept: Dict
-    modes: List[str] = []
+async def ensure_profile(db: AsyncSession, user_id: str) -> UserProfile:
+    stmt = select(UserProfile).where(UserProfile.user_id == user_id)
+    profile = (await db.execute(stmt)).scalar_one_or_none()
+    if profile:
+        return profile
+    profile = UserProfile(user_id=user_id)
+    db.add(profile)
+    await db.flush()
+    return profile
 
 
-class QuizCreateRequest(BaseModel):
-    session_id: str
-    difficulty: str = "intermediate"
-    question_count: int = 8
-
-
-class AnalyticsEventRequest(BaseModel):
-    type: str
-    session_id: Optional[str] = None
-    metadata: Dict = {}
-
-
-# --- Global data stores ---
-LEARNER_PROFILES: Dict[str, LearnerProfile] = {}
-SESSION_DATA: dict[str, dict] = {}
-
-
-# --- Helper functions for URL generation ---
 def to_original_url(path: str) -> str:
-    """Convert file path to /files URL."""
     rel = os.path.relpath(path, BASE_UPLOAD_DIR).replace("\\", "/")
     return f"/files/{rel}"
 
 
-def to_diagram_url(path: str | None) -> str | None:
-    """Convert file path to /diagrams URL."""
-    if not path:
+async def _redirect_if_anon(path: str, request: Request, db: AsyncSession) -> RedirectResponse | None:
+    user = await get_current_user_optional(request, db)
+    if user:
         return None
-    rel = os.path.relpath(path, IMAGE_OUTPUT_DIR).replace("\\", "/")
-    return f"/diagrams/{rel}"
+    return RedirectResponse(url=f"/login?next={path}", status_code=302)
 
 
-def to_organ_url(path: str | None) -> str | None:
-    """Convert file path to /organs URL."""
-    if not path:
-        return None
-    rel = os.path.relpath(path, ORGAN_IMAGE_DIR).replace("\\", "/")
-    return f"/organs/{rel}"
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def extract_learning_objectives(summary: str) -> List[str]:
-    """Extract key learning objectives from summary."""
-    objectives = []
-    lines = summary.split("\n")
-    for line in lines[:5]:
-        if line.strip().startswith("#"):
-            obj = line.replace("#", "").strip()
-            if obj:
-                objectives.append(f"Understand {obj}")
-    return objectives[:5]
+def _validate_password(password: str) -> None:
+    if not password or len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if len(password) > 128 or len(password.encode("utf-8")) > 256:
+        raise HTTPException(status_code=400, detail="Password is too long")
 
 
-def slugify(value: str) -> str:
-    """Create a simple stable id from a string."""
-    cleaned = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return cleaned or str(uuid.uuid4())[:8]
+async def _issue_refresh_token(db: AsyncSession, user_id: str, refresh: str) -> None:
+    db.add(
+        RefreshToken(
+            user_id=user_id,
+            token=refresh,
+            expires_at=(utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)).replace(tzinfo=None),
+        )
+    )
 
 
-def extract_concepts_from_summary(summary: str) -> List[Dict]:
-    """Derive concept cards from markdown summary headings and bullets."""
-    concepts: List[Dict] = []
-    current: Dict | None = None
+async def _revoke_refresh_tokens(db: AsyncSession, user_id: str) -> None:
+    rows = list((await db.execute(select(RefreshToken).where(RefreshToken.user_id == user_id))).scalars().all())
+    for row in rows:
+        row.revoked_at = datetime.utcnow()
 
-    for raw_line in summary.splitlines():
-        line = raw_line.strip()
+
+async def _create_email_token(
+    db: AsyncSession,
+    user: User,
+    purpose: str,
+    expires_in: timedelta,
+) -> str:
+    raw = secrets.token_urlsafe(32)
+    row = EmailToken(
+        user_id=user.id,
+        email=(user.email or "").lower(),
+        purpose=purpose,
+        token_hash=_hash_token(raw),
+        expires_at=(utcnow() + expires_in).replace(tzinfo=None),
+    )
+    db.add(row)
+    return raw
+
+
+def extract_concepts_from_summary(summary: str) -> list[dict[str, Any]]:
+    concepts: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for raw in summary.splitlines():
+        line = raw.strip()
         if not line:
             continue
-
         if line.startswith("### "):
             title = line[4:].strip()
             current = {
-                "id": slugify(title),
+                "id": str(uuid.uuid4()),
                 "name": title,
                 "summary": "",
                 "bullets": [],
@@ -177,1104 +224,1260 @@ def extract_concepts_from_summary(summary: str) -> List[Dict]:
             }
             concepts.append(current)
             continue
-
         if current and line.startswith(("- ", "* ")):
-            bullet = line[2:].strip()
-            if bullet:
-                current["bullets"].append(bullet)
+            current["bullets"].append(line[2:].strip())
 
     if not concepts:
-        fallback_lines = [
-            line.strip("-*# ").strip()
-            for line in summary.splitlines()
-            if line.strip()
-        ]
-        fallback_text = fallback_lines[:4]
-        for idx, line in enumerate(fallback_text):
+        lines = [ln.strip("-*# ").strip() for ln in summary.splitlines() if ln.strip()][:6]
+        for idx, line in enumerate(lines):
             concepts.append(
                 {
-                    "id": f"concept-{idx + 1}",
-                    "name": line[:80],
+                    "id": str(uuid.uuid4()),
+                    "name": line[:80] or f"Concept {idx+1}",
                     "summary": line,
                     "bullets": [line],
                     "type": "core",
-                    "importance": 1,
+                    "importance": max(1, 5 - idx),
                 }
             )
 
-    for index, concept in enumerate(concepts):
+    for idx, concept in enumerate(concepts):
         bullets = concept.get("bullets", [])
-        concept["summary"] = bullets[0] if bullets else f"Key idea from {concept['name']}."
-        concept["importance"] = max(1, min(5, len(bullets) or (len(concepts) - index)))
-        concept["type"] = "foundation" if index == 0 else ("bridge" if index < 3 else "detail")
+        concept["summary"] = bullets[0] if bullets else f"Key idea from {concept['name']}"
+        concept["type"] = "foundation" if idx == 0 else ("bridge" if idx < 3 else "detail")
+        concept["importance"] = min(5, max(1, len(bullets) if bullets else 2))
 
-    return concepts[:10]
-
-
-def build_knowledge_graph(concepts: List[Dict]) -> Dict:
-    """Create a lightweight graph model for the frontend."""
-    nodes = [
-        {
-            "id": concept["id"],
-            "name": concept["name"],
-            "group": concept.get("type", "core"),
-            "importance": concept.get("importance", 1),
-        }
-        for concept in concepts
-    ]
-
-    links: List[Dict] = []
-    for index in range(max(0, len(nodes) - 1)):
-        links.append(
-            {
-                "source": nodes[index]["id"],
-                "target": nodes[index + 1]["id"],
-                "strength": max(1, 4 - min(index, 3)),
-            }
-        )
-
-    if len(nodes) > 2:
-        links.append(
-            {
-                "source": nodes[0]["id"],
-                "target": nodes[-1]["id"],
-                "strength": 1,
-            }
-        )
-
-    return {"nodes": nodes, "links": links}
+    return concepts[:12]
 
 
-def detect_confusion_points(concepts: List[Dict]) -> List[Dict]:
-    """Flag denser concepts that likely need extra explanation."""
-    confusion_points: List[Dict] = []
-    for concept in concepts:
-        bullets = concept.get("bullets", [])
-        if len(bullets) >= 3 or any(len(item.split()) > 12 for item in bullets):
-            confusion_points.append(
-                {
-                    "concept": concept["name"],
-                    "reason": "Dense concept cluster detected from the source summary.",
-                    "tip": "Review the details tab and quiz this concept after the summary pass.",
-                }
-            )
-    return confusion_points[:3]
-
-
-def estimate_study_time_minutes(text: str, concepts: List[Dict]) -> int:
-    """Estimate study time from text length and concept count."""
+def estimate_study_time_minutes(text: str, concepts: list[dict[str, Any]]) -> int:
     word_count = len(text.split())
     baseline = max(8, word_count // 180)
-    return min(90, baseline + len(concepts) * 4)
+    return min(120, baseline + len(concepts) * 4)
 
 
-def compute_complexity_score(text: str, concepts: List[Dict]) -> int:
-    """Approximate content complexity for the status panel."""
-    word_count = len(text.split())
-    score = 25 + min(45, word_count // 120) + min(30, len(concepts) * 3)
-    return max(10, min(100, score))
+async def maybe_infer_profile(db: AsyncSession, user_id: str) -> UserProfile:
+    profile = await ensure_profile(db, user_id)
+
+    events_stmt = (
+        select(LearningEvent)
+        .where(LearningEvent.user_id == user_id)
+        .order_by(LearningEvent.created_at.desc())
+        .limit(30)
+    )
+    events = list((await db.execute(events_stmt)).scalars().all())
+    if len(events) < 3:
+        return profile
+
+    modality_time: dict[str, float] = {}
+    for e in events:
+        modality = (e.payload or {}).get("modality")
+        time_ms = float((e.payload or {}).get("time_on_chunk_ms", 0))
+        if modality:
+            modality_time[modality] = modality_time.get(modality, 0) + max(0.0, time_ms)
+
+    if modality_time:
+        profile.preferred_modality = max(modality_time.items(), key=lambda kv: kv[1])[0]
+
+    attempts = list(
+        (
+            await db.execute(
+                select(QuizAttempt)
+                .where(QuizAttempt.user_id == user_id)
+                .order_by(QuizAttempt.created_at.desc())
+                .limit(30)
+            )
+        ).scalars().all()
+    )
+
+    if attempts:
+        avg_score = sum(a.score for a in attempts) / len(attempts)
+        if avg_score > 80:
+            profile.difficulty_preference = "hard"
+        elif avg_score < 50:
+            profile.difficulty_preference = "easy"
+        else:
+            profile.difficulty_preference = "auto"
+
+    completed_stmt = select(func.count(TopicProgress.id)).where(
+        and_(TopicProgress.user_id == user_id, TopicProgress.status == "mastered")
+    )
+    completed = int((await db.execute(completed_stmt)).scalar() or 0)
+    expected_minutes = max(1.0, completed * 6.0)
+
+    total_time_ms = 0.0
+    for e in events:
+        total_time_ms += float((e.payload or {}).get("time_on_chunk_ms", 0))
+    actual_minutes = max(0.1, total_time_ms / 60000.0)
+    profile.learning_velocity = max(0.3, min(2.5, expected_minutes / max(0.1, actual_minutes)))
+
+    text_events = [e for e in events if (e.payload or {}).get("modality") == "text"]
+    visual_events = [e for e in events if (e.payload or {}).get("modality") == "visual"]
+    text_time = sum(float((e.payload or {}).get("time_on_chunk_ms", 0)) for e in text_events)
+    visual_time = sum(float((e.payload or {}).get("time_on_chunk_ms", 0)) for e in visual_events)
+
+    if text_time > visual_time * 1.5:
+        profile.cognitive_style = "visual"
+    elif profile.preferred_modality == "practice":
+        profile.cognitive_style = "kinesthetic"
+    else:
+        profile.cognitive_style = "conceptual"
+
+    profile.last_active_at = datetime.utcnow()
+    return profile
 
 
-def build_session_overview(
-    session_id: str,
-    filename: str,
-    text: str,
-    summary: str,
-    image_count: int,
-    intent: str | None = None,
-) -> Dict:
-    """Build structured metadata used by the upgraded frontend."""
-    concepts = extract_concepts_from_summary(summary)
-    graph = build_knowledge_graph(concepts)
-    confusion_points = detect_confusion_points(concepts)
-    learning_objectives = extract_learning_objectives(summary)
-    main_topic = concepts[0]["name"] if concepts else os.path.splitext(filename)[0]
-    study_time_minutes = estimate_study_time_minutes(text, concepts)
-    complexity = compute_complexity_score(text, concepts)
+def compute_next_difficulty(current: str, score: int) -> str:
+    if current == "medium" and score >= 80:
+        return "hard"
+    if current == "medium" and score < 50:
+        return "easy"
+    if current == "hard" and score >= 80:
+        return "hard"
+    if current == "easy" and score < 50:
+        return "easy"
+    return "medium"
+
+
+async def compute_next_steps_for_session(db: AsyncSession, user: User, session_id: str) -> dict[str, Any]:
+    progress = list(
+        (
+            await db.execute(
+                select(TopicProgress, Concept)
+                .join(Concept, Concept.id == TopicProgress.concept_id)
+                .where(and_(TopicProgress.user_id == user.id, TopicProgress.session_id == session_id))
+                .order_by(Concept.order_index.asc())
+            )
+        ).all()
+    )
+
+    if not progress:
+        return {"primary_action": "Upload a PDF to begin", "secondary_actions": [], "estimated_minutes_remaining": 0, "session_id": session_id}
+
+    weak = [row for row in progress if row[0].score < 50 and row[0].attempt_count >= 2]
+    unlocked = [row for row in progress if row[0].status == "unlocked"]
+    remaining = [row for row in progress if row[0].status != "mastered"]
+
+    if weak:
+        primary = f"Revisit {weak[0][1].name} - you're close"
+    elif unlocked:
+        primary = f"Continue to {unlocked[0][1].name}"
+    elif remaining:
+        primary = "Strengthen weak areas before finishing"
+    else:
+        avg_mastery = sum(r[0].score for r in progress) / max(1, len(progress))
+        primary = "You've mastered this document. Want a final test?" if avg_mastery >= 80 else "Strengthen weak areas before finishing"
+
+    profile = await ensure_profile(db, user.id)
+    velocity = max(0.4, profile.learning_velocity or 1.0)
+    estimated = int(sum((r[1].estimated_minutes or 5.0) for r in remaining) / velocity)
+    secondary = [f"Review {r[1].name}" for r in remaining[:3]]
 
     return {
+        "primary_action": primary,
+        "secondary_actions": secondary,
+        "estimated_minutes_remaining": max(0, estimated),
         "session_id": session_id,
-        "file_name": filename,
-        "intent": intent or "Understand the chapter",
-        "main_topic": main_topic,
-        "learning_objectives": learning_objectives,
-        "concepts": concepts,
-        "graph": graph,
-        "confusion_points": confusion_points,
-        "estimated_study_time_minutes": study_time_minutes,
-        "estimated_study_time_label": f"{study_time_minutes} min",
-        "complexity": complexity,
-        "visuals_count": image_count,
-        "share_card": {
-            "headline": f"{len(concepts)} concepts mapped from {filename}",
-            "stats": {
-                "concepts": len(concepts),
-                "visuals": image_count,
-                "study_time_minutes": study_time_minutes,
-                "confusion_points": len(confusion_points),
-            },
-            "top_concepts": [concept["name"] for concept in concepts[:5]],
+    }
+
+
+@app.post("/auth/signup")
+async def auth_signup(payload: EmailSignupRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    email = payload.email.lower()
+    _validate_password(payload.password)
+
+    existing = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if existing:
+        if existing.auth_provider == "google" and not existing.hashed_password:
+            raise HTTPException(status_code=400, detail="This email uses Google sign-in")
+        raise HTTPException(status_code=400, detail="Account already exists. Please sign in.")
+
+    user = User(email=email, display_name=payload.display_name or email.split("@")[0], auth_provider="email")
+    user.hashed_password = hash_value(payload.password)
+    user.email_verified_at = None
+    db.add(user)
+    await db.flush()
+
+    profile = await ensure_profile(db, user.id)
+
+    verify_token = await _create_email_token(db, user, "verify_email", timedelta(hours=24))
+    verify_url = f"{APP_PUBLIC_URL}/auth/verify-email?token={verify_token}"
+
+    access = create_access_token(user.id, user.email or "")
+    refresh = create_refresh_token(user.id)
+    await _issue_refresh_token(db, user.id, refresh)
+    set_auth_cookies(response, access, refresh)
+
+    return {
+        "user": {"id": user.id, "email": user.email, "display_name": user.display_name, "avatar_url": user.avatar_url},
+        "profile": {
+            "preferred_modality": profile.preferred_modality,
+            "learning_velocity": profile.learning_velocity,
+            "cognitive_style": profile.cognitive_style,
+            "difficulty_preference": profile.difficulty_preference,
+        },
+        "verified": False,
+        "verify_url": verify_url,
+    }
+
+
+@app.post("/auth/login")
+async def auth_login(payload: EmailLoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    email = payload.email.lower()
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid email or password")
+    if not user.hashed_password:
+        if user.auth_provider == "google":
+            raise HTTPException(status_code=400, detail="This email uses Google sign-in")
+        raise HTTPException(
+            status_code=400,
+            detail="No password set for this account. Use password reset to set one.",
+        )
+    if not verify_hash(payload.password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Invalid email or password")
+
+    user.last_login_at = datetime.utcnow()
+    profile = await ensure_profile(db, user.id)
+
+    access = create_access_token(user.id, user.email or "")
+    refresh = create_refresh_token(user.id)
+    await _issue_refresh_token(db, user.id, refresh)
+    set_auth_cookies(response, access, refresh)
+
+    verified = bool(user.email_verified_at)
+    return {
+        "user": {"id": user.id, "email": user.email, "display_name": user.display_name, "avatar_url": user.avatar_url},
+        "profile": {
+            "preferred_modality": profile.preferred_modality,
+            "learning_velocity": profile.learning_velocity,
+            "cognitive_style": profile.cognitive_style,
+            "difficulty_preference": profile.difficulty_preference,
+        },
+        "verified": verified,
+        "can_resend_verification": not verified,
+    }
+
+
+@app.post("/auth/resend-verification")
+async def auth_resend_verification(request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_required(request, db)
+    if user.email_verified_at:
+        return {"status": "already_verified"}
+    if not user.email:
+        raise HTTPException(status_code=400, detail="Missing email")
+
+    verify_token = await _create_email_token(db, user, "verify_email", timedelta(hours=24))
+    verify_url = f"{APP_PUBLIC_URL}/auth/verify-email?token={verify_token}"
+    return {"status": "sent", "verify_url": verify_url}
+
+
+@app.get("/auth/verify-email")
+async def auth_verify_email(token: str, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    wants_html = "text/html" in (request.headers.get("accept") or "").lower()
+    token_hash = _hash_token(token)
+
+    row = (
+        await db.execute(
+            select(EmailToken).where(
+                and_(
+                    EmailToken.token_hash == token_hash,
+                    EmailToken.purpose == "verify_email",
+                )
+            )
+        )
+    ).scalar_one_or_none()
+    if not row or row.consumed_at is not None:
+        if wants_html:
+            return HTMLResponse(status_code=400, content="<h2>Invalid link</h2><p><a href='/'>Back</a></p>")
+        raise HTTPException(status_code=400, detail="Invalid link")
+    if row.expires_at.replace(tzinfo=timezone.utc) < utcnow():
+        if wants_html:
+            return HTMLResponse(status_code=400, content="<h2>Link expired</h2><p><a href='/'>Back</a></p>")
+        raise HTTPException(status_code=400, detail="Link expired")
+
+    user = await db.get(User, row.user_id)
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid link")
+
+    user.email_verified_at = datetime.utcnow()
+    row.consumed_at = datetime.utcnow()
+
+    if wants_html:
+        return RedirectResponse(url="/", status_code=302)
+    return {"status": "verified"}
+
+
+@app.post("/auth/request-password-reset")
+async def auth_request_password_reset(payload: RequestResetRequest, db: AsyncSession = Depends(get_db)):
+    email = payload.email.lower()
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+
+    reset_url = None
+    if user and user.email:
+        reset_token = await _create_email_token(db, user, "reset_password", timedelta(minutes=30))
+        reset_url = f"{APP_PUBLIC_URL}/auth/reset?token={reset_token}"
+
+    return {"status": "ok", "reset_url": reset_url}
+
+
+@app.get("/auth/reset", response_class=HTMLResponse)
+async def auth_reset_page(token: str):
+    return HTMLResponse(
+        content=f"""
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reset password</title>
+  <style>
+    body {{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:#0b0f17; color:#f8fafc; margin:0; padding:2rem; }}
+    .card {{ max-width:420px; margin:0 auto; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); border-radius:16px; padding:1.25rem; }}
+    h1 {{ margin:0 0 .75rem; font-size:1.25rem; }}
+    label {{ display:block; font-size:.9rem; margin:.75rem 0 .35rem; opacity:.9; }}
+    input {{ width:100%; padding:.7rem .8rem; border-radius:12px; border:1px solid rgba(255,255,255,.18); background:rgba(0,0,0,.25); color:#fff; }}
+    button {{ margin-top:1rem; width:100%; padding:.75rem .9rem; border-radius:12px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.12); color:#fff; font-weight:700; cursor:pointer; }}
+    .msg {{ margin-top:.75rem; font-size:.9rem; opacity:.9; }}
+    a {{ color:#93c5fd; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Set a new password</h1>
+    <form id="f">
+      <input type="hidden" name="token" value="{token}" />
+      <label>New password</label>
+      <input name="new_password" type="password" minlength="8" required />
+      <button type="submit">Reset password</button>
+      <div class="msg" id="msg"></div>
+    </form>
+  </div>
+  <script>
+    const form = document.getElementById('f');
+    const msg = document.getElementById('msg');
+    form.addEventListener('submit', async (e) => {{
+      e.preventDefault();
+      msg.textContent = 'Working…';
+      const fd = new FormData(form);
+      const body = Object.fromEntries(fd.entries());
+      const res = await fetch('/auth/reset-password', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(body),
+        credentials: 'include'
+      }});
+      const data = await res.json().catch(() => ({{}}));
+      if (!res.ok) {{
+        msg.textContent = data.detail || 'Reset failed';
+        return;
+      }}
+      msg.innerHTML = 'Password updated. <a href=\"/\">Go back</a>.';
+    }});
+  </script>
+</body>
+</html>
+""",
+    )
+
+
+@app.post("/auth/reset-password")
+async def auth_reset_password(payload: ResetPasswordRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    _validate_password(payload.new_password)
+    token_hash = _hash_token(payload.token)
+
+    row = (
+        await db.execute(
+            select(EmailToken).where(
+                and_(
+                    EmailToken.token_hash == token_hash,
+                    EmailToken.purpose == "reset_password",
+                )
+            )
+        )
+    ).scalar_one_or_none()
+    if not row or row.consumed_at is not None:
+        raise HTTPException(status_code=400, detail="Invalid link")
+    if row.expires_at.replace(tzinfo=timezone.utc) < utcnow():
+        raise HTTPException(status_code=400, detail="Link expired")
+
+    user = await db.get(User, row.user_id)
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid link")
+
+    user.hashed_password = hash_value(payload.new_password)
+    row.consumed_at = datetime.utcnow()
+    await _revoke_refresh_tokens(db, user.id)
+    clear_auth_cookies(response)
+    return {"status": "ok"}
+
+
+@app.post("/auth/change-password")
+async def auth_change_password(payload: ChangePasswordRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_required(request, db)
+    if not user.hashed_password:
+        raise HTTPException(status_code=400, detail="Password login is not enabled for this account")
+    if not verify_hash(payload.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    _validate_password(payload.new_password)
+    user.hashed_password = hash_value(payload.new_password)
+    await _revoke_refresh_tokens(db, user.id)
+    clear_auth_cookies(response)
+    return {"status": "ok"}
+
+
+@app.post("/auth/google")
+async def auth_google(payload: GoogleAuthRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        token_info = await client.get("https://oauth2.googleapis.com/tokeninfo", params={"id_token": payload.id_token})
+    if token_info.status_code != 200:
+        raise HTTPException(status_code=400, detail="Invalid Google token")
+
+    info = token_info.json()
+    if GOOGLE_CLIENT_ID and info.get("aud") != GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=400, detail="Invalid token audience")
+
+    email = (info.get("email") or "").lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Google token missing email")
+
+    stmt = select(User).where(User.email == email)
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if not user:
+        user = User(
+            email=email,
+            display_name=info.get("name") or email.split("@")[0],
+            avatar_url=info.get("picture"),
+            auth_provider="google",
+        )
+        user.email_verified_at = datetime.utcnow()
+        db.add(user)
+        await db.flush()
+    elif not user.email_verified_at:
+        user.email_verified_at = datetime.utcnow()
+
+    user.last_login_at = datetime.utcnow()
+    profile = await ensure_profile(db, user.id)
+
+    access = create_access_token(user.id, user.email or "")
+    refresh = create_refresh_token(user.id)
+    await _issue_refresh_token(db, user.id, refresh)
+
+    set_auth_cookies(response, access, refresh)
+    return {
+        "user": {"id": user.id, "email": user.email, "display_name": user.display_name, "avatar_url": user.avatar_url},
+        "profile": {
+            "preferred_modality": profile.preferred_modality,
+            "learning_velocity": profile.learning_velocity,
+            "cognitive_style": profile.cognitive_style,
+            "difficulty_preference": profile.difficulty_preference,
         },
     }
 
 
-# ============================================================================
-# CORE ENDPOINTS - PDF Upload & Content Extraction
-# ============================================================================
+@app.get("/auth/google-client-id")
+async def auth_google_client_id():
+    return {"client_id": GOOGLE_CLIENT_ID}
 
-@app.get("/")
-async def serve_index():
-    """Serve the single-page frontend."""
-    html_path = INDEX_HTML_PATH
-    new_frontend_path = os.path.join(PROJECT_ROOT, "eduvision-progressive.html")
-    if os.path.exists(new_frontend_path):
-        html_path = new_frontend_path
-    with open(html_path, "r", encoding="utf-8") as f:
-        content = f.read()
-    return HTMLResponse(content=content)
 
-@app.post("/upload")
-async def upload_pdf(
+@app.post("/auth/refresh")
+async def auth_refresh(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    refresh = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not refresh:
+        raise HTTPException(status_code=401, detail="Missing refresh token")
+    payload = decode_token(refresh)
+    if not payload or payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    row_stmt = select(RefreshToken).where(RefreshToken.token == refresh)
+    row = (await db.execute(row_stmt)).scalar_one_or_none()
+    if not row or row.revoked_at is not None or row.expires_at.replace(tzinfo=timezone.utc) < utcnow():
+        raise HTTPException(status_code=401, detail="Refresh token expired")
+
+    user = await db.get(User, payload.get("sub"))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    access = create_access_token(user.id, user.email or "")
+    set_auth_cookies(response, access, refresh)
+    return {"status": "ok"}
+
+
+@app.post("/auth/logout")
+async def auth_logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    refresh = request.cookies.get(REFRESH_COOKIE_NAME)
+    if refresh:
+        row = (await db.execute(select(RefreshToken).where(RefreshToken.token == refresh))).scalar_one_or_none()
+        if row:
+            row.revoked_at = datetime.utcnow()
+    clear_auth_cookies(response)
+    return {"status": "ok"}
+
+
+@app.get("/auth/me")
+async def auth_me(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_optional(request, db)
+    if not user:
+        return {"authenticated": False}
+    profile = await ensure_profile(db, user.id)
+    return {
+        "authenticated": True,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "display_name": user.display_name,
+            "avatar_url": user.avatar_url,
+            "verified": bool(user.email_verified_at),
+        },
+        "profile": {
+            "preferred_modality": profile.preferred_modality,
+            "avg_session_length_minutes": profile.avg_session_length_minutes,
+            "total_concepts_mastered": profile.total_concepts_mastered,
+            "learning_velocity": profile.learning_velocity,
+            "streak_days": profile.streak_days,
+            "cognitive_style": profile.cognitive_style,
+            "difficulty_preference": profile.difficulty_preference,
+        },
+    }
+
+
+@app.get("/api/user/documents")
+async def user_documents(request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_required(request, db)
+
+    sessions = list(
+        (
+            await db.execute(
+                select(LearningSession)
+                .where(LearningSession.user_id == user.id)
+                .order_by(LearningSession.created_at.desc())
+                .limit(24)
+            )
+        ).scalars().all()
+    )
+    if not sessions:
+        return {"documents": []}
+
+    session_ids = [s.id for s in sessions]
+    progress_rows = list(
+        (
+            await db.execute(
+                select(TopicProgress).where(and_(TopicProgress.user_id == user.id, TopicProgress.session_id.in_(session_ids)))
+            )
+        ).scalars().all()
+    )
+    progress_by_session: dict[str, list[TopicProgress]] = {}
+    for p in progress_rows:
+        progress_by_session.setdefault(p.session_id, []).append(p)
+
+    docs: list[dict[str, Any]] = []
+    for s in sessions:
+        rows = progress_by_session.get(s.id, [])
+        total = len(rows)
+        mastered = sum(1 for r in rows if r.status == "mastered")
+        pct = int(round((mastered / total) * 100)) if total else 0
+        created = s.created_at.strftime("%b %d, %Y") if s.created_at else "—"
+        docs.append(
+            {
+                "id": s.id,
+                "title": s.filename or "Untitled",
+                "progress": pct,
+                "progress_label": f"{pct}%",
+                "subtitle": f"{total} concepts • {created}",
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            }
+        )
+
+    return {"documents": docs}
+
+
+@app.get("/api/user/at-risk-concepts")
+async def user_at_risk_concepts(request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_required(request, db)
+
+    rows = list(
+        (
+            await db.execute(
+                select(TopicProgress, Concept)
+                .join(Concept, Concept.id == TopicProgress.concept_id)
+                .where(
+                    and_(
+                        TopicProgress.user_id == user.id,
+                        TopicProgress.session_id.is_not(None),
+                        TopicProgress.status.in_(["struggling", "in_progress"]),
+                    )
+                )
+                .order_by(TopicProgress.score.asc(), TopicProgress.updated_at.desc())
+                .limit(10)
+            )
+        ).all()
+    )
+
+    concepts: list[dict[str, Any]] = []
+    for p, c in rows:
+        hint = f"Score {int(p.score or 0)} • {p.attempt_count or 0} attempts"
+        concepts.append(
+            {
+                "session_id": p.session_id,
+                "concept_id": c.id,
+                "name": c.name,
+                "hint": hint,
+                "score": int(p.score or 0),
+                "attempt_count": int(p.attempt_count or 0),
+            }
+        )
+
+    return {"concepts": concepts}
+
+
+@app.get("/api/user/recommendations")
+async def user_recommendations(request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_required(request, db)
+
+    latest = (await db.execute(select(LearningSession).where(LearningSession.user_id == user.id).order_by(LearningSession.created_at.desc()).limit(1))).scalar_one_or_none()
+    if not latest:
+        return {"primary_action": "Upload a PDF to start learning", "secondary_actions": [], "estimated_minutes_remaining": 0, "session_id": None}
+
+    return await compute_next_steps_for_session(db, user, latest.id)
+
+
+@app.post("/api/process")
+async def process_document(
+    request: Request,
     file: UploadFile = File(...),
-    intent: Optional[str] = Form(None),
+    learningIntent: str = Form("Understand the chapter"),
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Upload a medical PDF and initialize learning session.
-    Extracts text, images, and generates initial summary.
-    """
+    user = await get_current_user_verified_required(request, db)
+
     contents = await file.read()
     session_id = str(uuid.uuid4())
-
-    # Save and extract content
     pdf_path = save_upload(file.filename, contents)
     text = extract_text(pdf_path)
-    summary = summarize_text(text)
+    summary = await summarize_text(text, max_sections=8)
     image_paths = extract_images(pdf_path, session_id)
 
-    # Filter images by size
-    large_image_paths: list[str] = []
+    large_image_paths = []
     for path in image_paths:
         try:
-            if os.path.getsize(path) > 1024:  # Keep only > 1KB
+            if os.path.getsize(path) > 1024:
                 large_image_paths.append(path)
             else:
                 os.remove(path)
         except OSError:
             continue
 
-    # Store session data
-    SESSION_DATA[session_id] = {
-        "pdf_path": pdf_path,
-        "text": text,
-        "summary": summary,
-        "intent": intent or "Understand the chapter",
-        "images": large_image_paths,
-        "translations": {},
-        "details": None,
-        "references": None,
-        "labeled": [],
-    }
-    SESSION_DATA[session_id]["overview"] = build_session_overview(
-        session_id=session_id,
-        filename=file.filename,
-        text=text,
-        summary=summary,
-        image_count=len(large_image_paths),
-        intent=intent,
-    )
-
-    # Initialize learner profile
-    learner = LearnerProfile(
-        session_id=session_id,
-        created_at=datetime.now(),
-    )
-
-    main_topic = Topic(
-        id=session_id,
-        name=os.path.splitext(file.filename)[0],
-        summary=summary,
-        prerequisites=[],
-        difficulty=DifficultyLevel.INTERMEDIATE,
-        estimated_time_minutes=45,
-    )
-
-    learner.add_topic(main_topic)
-    LEARNER_PROFILES[session_id] = learner
-
-    overview = SESSION_DATA[session_id]["overview"]
-
-    return {
+    concepts = extract_concepts_from_summary(summary)
+    overview = {
         "session_id": session_id,
-        "summary": summary,
-        "image_count": len(large_image_paths),
-        "learning_objectives": overview["learning_objectives"],
-        "intent": overview["intent"],
-        "overview": overview,
+        "file_name": file.filename,
+        "intent": learningIntent,
+        "concepts": concepts,
+        "estimated_study_time_minutes": estimate_study_time_minutes(text, concepts),
+        "visuals_count": len(large_image_paths),
     }
 
+    db_session = LearningSession(
+        id=session_id,
+        user_id=user.id,
+        filename=file.filename,
+        pdf_path=pdf_path,
+        text_content=text,
+        summary=summary,
+        intent=learningIntent,
+        image_paths_json=[to_original_url(p) for p in large_image_paths],
+        concepts_json=concepts,
+        overview_json=overview,
+    )
+    db.add(db_session)
 
-@app.post("/api/process-pdf")
-async def process_pdf_api(
-    file: UploadFile = File(...),
-    intent: Optional[str] = Form(None),
-):
-    """Guide-aligned alias for document processing."""
-    return await upload_pdf(file, intent)
+    for idx, c in enumerate(concepts):
+        content = "\n".join([f"- {b}" for b in c.get("bullets", [])]) or c.get("summary", "")
+        db.add(
+            Concept(
+                id=c["id"],
+                session_id=session_id,
+                name=c["name"],
+                summary=c.get("summary", ""),
+                content=content,
+                concept_type=c.get("type", "core"),
+                importance=c.get("importance", 1),
+                order_index=idx,
+                estimated_minutes=5,
+            )
+        )
+        db.add(
+            TopicProgress(
+                user_id=user.id,
+                session_id=session_id,
+                concept_id=c["id"],
+                status="unlocked" if idx == 0 else "locked",
+                current_difficulty="medium",
+            )
+        )
 
+    # Ensure the session is committed before returning the `sessionId`.
+    # Otherwise, the client can redirect to `/learn/{sessionId}` and fetch
+    # `/api/session/{sessionId}` before the dependency teardown commits.
+    await db.commit()
 
-# ============================================================================
-# NEW FRONTEND ENDPOINTS - For eduvision-progressive.html
-# ============================================================================
-
-@app.get("/app.js")
-async def serve_app_js():
-    """Serve the frontend JavaScript (legacy route)."""
-    from fastapi.responses import Response
-    app_js_path = os.path.join(STATIC_DIR, "app.js")
-    if os.path.exists(app_js_path):
-        with open(app_js_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        return Response(content=content, media_type="application/javascript")
-    return JSONResponse(status_code=404, content={"error": "app.js not found"})
-
-
-@app.get("/favicon.ico")
-async def favicon():
-    """Return empty 204 for favicon — no body allowed on 204."""
-    from fastapi.responses import Response
-    return Response(status_code=204)
-
-
-@app.post("/api/process")
-async def process_document_new_frontend(
-    file: UploadFile = File(...),
-    learningIntent: str = Form(...),
-    sessionId: Optional[str] = Form(None)
-):
-    """
-    Process document endpoint compatible with new frontend.
-    Maps to existing upload_pdf endpoint.
-    """
-    # Use existing upload logic
-    result = await upload_pdf(file, learningIntent)
-    
-    # Extract data for new frontend format
-    session_id = result["session_id"]
-    data = SESSION_DATA.get(session_id)
-    overview = data.get("overview", {})
-    
-    # Return in format expected by new frontend
     return {
         "sessionId": session_id,
         "status": "complete",
-        "mainTopic": overview.get("main_topic", "Unknown"),
-        "complexity": f"{overview.get('complexity', 50)}/100",
-        "studyTime": overview.get("estimated_study_time_label", "10 min"),
-        "visuals": overview.get("visuals_count", 0),
-        "concepts": overview.get("concepts", []),
-        "confusionPoints": overview.get("confusion_points", []),
-        "summary": result["summary"],
-        "stages": [
-            {"id": "extract", "label": "Extracting text and structure", "status": "complete"},
-            {"id": "concepts", "label": "Identifying core concepts", "status": "complete"},
-            {"id": "relationships", "label": "Mapping relationships", "status": "complete"},
-            {"id": "visuals", "label": "Preparing visuals", "status": "complete"},
-            {"id": "hooks", "label": "Generating study hooks", "status": "complete"}
-        ]
+        "mainTopic": concepts[0]["name"] if concepts else file.filename,
+        "studyTime": f"{overview['estimated_study_time_minutes']} min",
+        "visuals": len(large_image_paths),
+        "concepts": concepts,
+        "summary": summary,
+        "pdfUrl": to_original_url(pdf_path),
     }
 
 
-@app.post("/api/generate-details")
-async def generate_details_new_frontend(sessionId: str = Form(...)):
-    """Generate detailed explanation - new frontend compatible."""
-    data = SESSION_DATA.get(sessionId)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Session not found"})
-    
-    if not data["details"]:
-        data["details"] = generate_detailed_text(data["summary"], data["text"])
-    
+@app.get("/api/session/{session_id}")
+async def get_session(session_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_verified_required(request, db)
+    session = await db.get(LearningSession, session_id)
+    if not session or session.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    pdf_url: str | None = None
+    if session.pdf_path:
+        pdf_url = to_original_url(session.pdf_path)
+
+    concepts = list(
+        (
+            await db.execute(select(Concept).where(Concept.session_id == session_id).order_by(Concept.order_index.asc()))
+        ).scalars().all()
+    )
+    progress = list(
+        (
+            await db.execute(
+                select(TopicProgress).where(and_(TopicProgress.session_id == session_id, TopicProgress.user_id == user.id))
+            )
+        ).scalars().all()
+    )
+    progress_map = {p.concept_id: p for p in progress}
+
     return {
-        "sessionId": sessionId,
-        "content": data["details"]
+        "session": {
+            "id": session.id,
+            "filename": session.filename,
+            "pdf_url": pdf_url,
+            "summary": session.summary,
+            "concepts": [
+                {
+                    "id": c.id,
+                    "title": c.name,
+                    "summary": c.summary,
+                    "content": c.content,
+                    "order_index": c.order_index,
+                    "estimated_minutes": c.estimated_minutes,
+                    "status": progress_map.get(c.id).status if progress_map.get(c.id) else "locked",
+                    "score": progress_map.get(c.id).score if progress_map.get(c.id) else 0,
+                    "attempt_count": progress_map.get(c.id).attempt_count if progress_map.get(c.id) else 0,
+                    "current_difficulty": progress_map.get(c.id).current_difficulty if progress_map.get(c.id) else "medium",
+                }
+                for c in concepts
+            ],
+        }
     }
 
 
-@app.post("/api/translate")
-async def translate_new_frontend(
-    sessionId: str = Form(...),
-    language: str = Form(...)
-):
-    """Translate content - new frontend compatible."""
-    data = SESSION_DATA.get(sessionId)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Session not found"})
-    
-    if language not in data["translations"]:
-        data["translations"][language] = translate_summary(data["summary"], language)
-    
+@app.get("/api/session/{session_id}/check-questions")
+async def get_check_questions(session_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_verified_required(request, db)
+    session = await db.get(LearningSession, session_id)
+    if not session or session.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    overview = session.overview_json or {}
+    if isinstance(overview, dict) and overview.get("check_questions"):
+        return {"questions": overview.get("check_questions")}
+
+    questions = await generate_check_questions_from_summary(session.summary or "", n=3)
+    if not isinstance(overview, dict):
+        overview = {}
+    overview["check_questions"] = questions
+    session.overview_json = overview
+    await db.commit()
+
+    return {"questions": questions}
+
+
+@app.get("/api/session/{session_id}/detailed-summary")
+async def get_detailed_summary(session_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_verified_required(request, db)
+    session = await db.get(LearningSession, session_id)
+    if not session or session.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    overview = session.overview_json or {}
+    if isinstance(overview, dict) and overview.get("detailed_summary"):
+        return {"detailed_summary": overview.get("detailed_summary")}
+
+    detailed = await detailed_summary_text(session.text_content or "")
+    if not isinstance(overview, dict):
+        overview = {}
+    overview["detailed_summary"] = detailed
+    session.overview_json = overview
+    await db.commit()
+    return {"detailed_summary": detailed}
+
+
+@app.post("/api/session/{session_id}/translate")
+async def translate_session_text(session_id: str, payload: TranslateRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_verified_required(request, db)
+    session = await db.get(LearningSession, session_id)
+    if not session or session.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    target = (payload.target_language or "").strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Missing target_language")
+
+    overview = session.overview_json or {}
+    if not isinstance(overview, dict):
+        overview = {}
+
+    translations = overview.get("translations")
+    if not isinstance(translations, dict):
+        translations = {}
+
+    cache_key = target.lower()
+    if cache_key in translations and isinstance(translations.get(cache_key), str):
+        return {"translated_text": translations.get(cache_key), "cached": True}
+
+    source_text = payload.text
+    if not source_text:
+        source_text = overview.get("detailed_summary") or session.summary or ""
+
+    from .azure_openai_utils import azure_text
+
+    prompt = f"""Translate the following markdown into {target}.
+Preserve markdown structure (headings, bullets) and keep meaning accurate.
+
+Text:
+{source_text}
+"""
+    translated = await azure_text(
+        system="You are a precise translator for study notes.",
+        prompt=prompt,
+        fallback=source_text,
+    )
+
+    translations[cache_key] = translated
+    overview["translations"] = translations
+    session.overview_json = overview
+    await db.commit()
+
+    return {"translated_text": translated, "cached": False}
+
+
+@app.post("/api/track-event")
+async def track_event(payload: TrackEventRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_verified_required(request, db)
+    event = LearningEvent(
+        user_id=user.id,
+        session_id=payload.session_id,
+        chunk_id=payload.chunk_id,
+        event_type=payload.event_type,
+        payload=payload.payload,
+    )
+    db.add(event)
+    return {"ok": True}
+
+
+@app.post("/api/infer-profile")
+async def infer_profile(_: InferProfileRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_verified_required(request, db)
+    profile = await maybe_infer_profile(db, user.id)
     return {
-        "sessionId": sessionId,
-        "language": language,
-        "content": data["translations"][language]
+        "preferred_modality": profile.preferred_modality,
+        "learning_velocity": profile.learning_velocity,
+        "cognitive_style": profile.cognitive_style,
+        "difficulty_preference": profile.difficulty_preference,
     }
 
 
 @app.post("/api/generate-quiz")
-async def generate_quiz_new_frontend(
-    sessionId: str = Form(...),
-    difficulty: str = Form(...)
-):
-    """Generate quiz - new frontend compatible."""
-    data = SESSION_DATA.get(sessionId)
-    learner = LEARNER_PROFILES.get(sessionId)
-    
-    if not data or not learner:
-        return JSONResponse(status_code=404, content={"error": "Invalid session"})
-    
-    try:
-        difficulty_level = DifficultyLevel(difficulty)
-    except ValueError:
-        difficulty_level = DifficultyLevel.INTERMEDIATE
-    
-    questions = generate_quiz_from_content(
-        topic_name=list(learner.topics.values())[0].name if learner.topics else "Topic",
-        summary=data["summary"],
-        detailed_text=data.get("details", ""),
-        difficulty=difficulty_level,
-        num_questions=8
+async def generate_quiz(payload: GenerateQuizRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_verified_required(request, db)
+    concept = await db.get(Concept, payload.chunk_id)
+    if not concept:
+        raise HTTPException(status_code=404, detail="Concept not found")
+
+    question = await generate_quiz_from_content(
+        concept.content or concept.summary or concept.name,
+        payload.difficulty,
+        payload.question_type,
     )
-    
-    quiz_id = str(uuid.uuid4())
-    learner.quizzes[quiz_id] = questions
-    
-    # Format for new frontend
-    formatted_questions = []
-    for q in questions:
-        formatted_q = {
-            "id": q.id,
-            "question": q.question,
-            "type": q.type.value,
-            "options": [],
-            "correctAnswer": q.correct_answer,
-        }
 
-        if q.type in (QuestionType.MULTIPLE_CHOICE, QuestionType.TRUE_FALSE) and q.options:
-            formatted_q["options"] = [
-                {"id": chr(97 + i), "text": opt}
-                for i, opt in enumerate(q.options)
-            ]
-
-        formatted_questions.append(formatted_q)
+    # Cache generated question for consistent evaluation on submit.
+    session = await db.get(LearningSession, concept.session_id)
+    if session:
+        overview = session.overview_json or {}
+        if not isinstance(overview, dict):
+            overview = {}
+        cache = overview.get("quiz_cache")
+        if not isinstance(cache, dict):
+            cache = {}
+        key = f"{concept.id}:{payload.difficulty}:{(payload.question_type or '').strip().lower()}"
+        cache[key] = question
+        overview["quiz_cache"] = cache
+        session.overview_json = overview
+        await db.commit()
 
     return {
-        "sessionId": sessionId,
-        "difficulty": difficulty,
-        "questions": formatted_questions,
+        "chunk_id": concept.id,
+        "difficulty": payload.difficulty,
+        "question_type": payload.question_type,
+        "question": question,
     }
 
 
 @app.post("/api/submit-quiz")
-async def submit_quiz_new_frontend(
-    sessionId: str = Form(...),
-    answers: str = Form(...)
-):
-    """Submit quiz answers - new frontend compatible."""
-    import json
-    
-    learner = LEARNER_PROFILES.get(sessionId)
-    if not learner:
-        return JSONResponse(status_code=404, content={"error": "Session not found"})
-    
-    user_answers = json.loads(answers)
-    
-    # Find the most recent quiz
-    if not learner.quizzes:
-        return JSONResponse(status_code=404, content={"error": "No quiz found"})
-    
-    quiz_id = list(learner.quizzes.keys())[-1]
-    questions = learner.quizzes[quiz_id]
-    
-    total_questions = len(questions)
-    correct_count = 0
-    results = []
-    
-    for question in questions:
-        user_answer_id = user_answers.get(str(question.id), "")
-        
-        # Convert letter answer to actual text if multiple choice
-        if question.type == QuestionType.MULTIPLE_CHOICE and question.options:
-            try:
-                answer_idx = ord(user_answer_id) - 97  # Convert 'a' to 0, 'b' to 1, etc.
-                user_answer_text = question.options[answer_idx] if 0 <= answer_idx < len(question.options) else ""
-            except:
-                user_answer_text = user_answer_id
-        else:
-            user_answer_text = user_answer_id
+async def submit_quiz(payload: SubmitQuizRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_verified_required(request, db)
+    concept = await db.get(Concept, payload.chunk_id)
+    if not concept:
+        raise HTTPException(status_code=404, detail="Concept not found")
 
-        evaluation = evaluate_answer(question, user_answer_text)
+    qt = (payload.question_type or "").strip().lower()
+    session = await db.get(LearningSession, concept.session_id)
+    cached = None
+    if session and isinstance(session.overview_json, dict):
+        cache = session.overview_json.get("quiz_cache")
+        if isinstance(cache, dict):
+            cached = cache.get(f"{concept.id}:{payload.difficulty}:{qt}")
 
-        if evaluation["is_correct"]:
-            correct_count += 1
-
-        results.append({
-            "questionId": str(question.id),
-            "userAnswer": user_answer_id,
-            "correctAnswer": question.correct_answer,
-            "isCorrect": evaluation["is_correct"],
-        })
-
-    percentage = round((correct_count / total_questions) * 100) if total_questions > 0 else 0
-
-    # Persist quiz attempt so dashboard analytics update
-    topic_id = list(learner.topics.keys())[0] if learner.topics else None
-    if topic_id and topic_id in learner.topic_progress:
-        attempt = QuizAttempt(
-            quiz_id=quiz_id,
-            timestamp=datetime.now(),
-            answers=user_answers,
-            score=percentage,
-            time_taken=0,
-            topics_covered=[topic_id],
-        )
-        learner.topic_progress[topic_id].quiz_attempts.append(attempt)
-        learner.topic_progress[topic_id].best_quiz_score = max(
-            learner.topic_progress[topic_id].best_quiz_score, percentage
-        )
-        learner.topic_progress[topic_id].completion_percentage = min(
-            learner.topic_progress[topic_id].completion_percentage + 20, 100
-        )
-
-    return {
-        "sessionId": sessionId,
-        "score": correct_count,
-        "total": total_questions,
-        "percentage": percentage,
-        "results": results,
-    }
-
-
-@app.post("/api/generate-roadmap")
-async def generate_roadmap_new_frontend(sessionId: str = Form(...)):
-    """Generate study roadmap - new frontend compatible."""
-    data = SESSION_DATA.get(sessionId)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Session not found"})
-    
-    if not data["references"]:
-        data["references"] = generate_references(data["summary"])
-    
-    refs = data["references"]
-
-    before = []
-    after = []
-    by_level = {"beginner": [], "intermediate": [], "expert": []}
-
-    if isinstance(refs, dict):
-        for item in refs.get("before_topics", []):
-            before.append({"title": item.get("title", ""), "subtitle": item.get("why", "")})
-        for item in refs.get("after_topics", []):
-            after.append({"title": item.get("title", ""), "subtitle": item.get("why", "")})
-        raw_levels = refs.get("references_by_level", {})
-        for level in ("beginner", "intermediate", "expert"):
-            by_level[level] = raw_levels.get(level, [])
-
-    if not before:
-        before = [
-            {"title": "Basic Biology", "subtitle": "Foundational concepts"},
-            {"title": "Introduction to the Topic", "subtitle": "Overview and context"},
-        ]
-    if not after:
-        after = [
-            {"title": "Advanced Topics", "subtitle": "Building on fundamentals"},
-            {"title": "Practical Applications", "subtitle": "Real-world scenarios"},
-        ]
-
-    return {
-        "sessionId": sessionId,
-        "roadmap": {
-            "before": before[:5],
-            "after": after[:5],
-            "byLevel": by_level,
-        },
-    }
-
-
-@app.post("/api/load-dashboard")
-async def load_dashboard_new_frontend(sessionId: str = Form(...)):
-    """Load analytics dashboard - new frontend compatible."""
-    learner = LEARNER_PROFILES.get(sessionId)
-    if not learner:
-        return JSONResponse(status_code=404, content={"error": "Session not found"})
-    
-    learner.calculate_overall_progress()
-    stats = learner.get_dashboard_stats()
-    recommendations = LearningAnalytics.get_study_recommendations(learner)
-
-    # Build per-topic performance for strengths / practice lists
-    topic_names = {tid: t.name for tid, t in learner.topics.items()}
-    strengths: List[str] = []
-    needs_practice: List[str] = []
-    for topic_id, progress in learner.topic_progress.items():
-        name = topic_names.get(topic_id, topic_id)
-        if progress.quiz_attempts:
-            if progress.best_quiz_score >= 70:
-                strengths.append(name)
-            else:
-                needs_practice.append(name)
-    # If no quiz attempts yet, list all topics as needing practice
-    if not strengths and not needs_practice:
-        needs_practice = list(topic_names.values())[:5]
-
-    analytics = {
-        "progress": round(learner.overall_completion_percentage),
-        "quizzesTaken": stats.get("total_quizzes_taken", 0),
-        "accuracy": round(stats.get("average_quiz_score", 0)),
-        "recommendations": [
-            {
-                "type": "focus",
-                "title": recommendations[0].get("title", "💡 Recommendation") if recommendations else "💡 Recommendation",
-                "message": recommendations[0].get("description", "Keep up the great work!") if recommendations else "Keep up the great work!",
-            },
-            {
-                "type": "next",
-                "title": recommendations[1].get("title", "🎯 Next Steps") if len(recommendations) > 1 else "🎯 Next Steps",
-                "message": recommendations[1].get("description", "Continue your learning journey") if len(recommendations) > 1 else "Continue your learning journey",
-            },
-        ],
-        "strengths": strengths[:5],
-        "needsPractice": needs_practice[:5],
-    }
-    
-    return {
-        "sessionId": sessionId,
-        "analytics": analytics
-    }
-
-
-@app.post("/api/load-images")
-async def load_images_new_frontend(sessionId: str = Form(...)):
-    """Load extracted images - new frontend compatible."""
-    data = SESSION_DATA.get(sessionId)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Session not found"})
-    
-    images = []
-    for path in data["images"]:
-        images.append({
-            "url": to_original_url(path),
-            "title": f"Image {len(images) + 1}",
-            "description": "Extracted diagram"
-        })
-    
-    return {
-        "sessionId": sessionId,
-        "images": images
-    }
-
-
-# ============================================================================
-# ORIGINAL ENDPOINTS - Maintained for compatibility
-# ============================================================================
-
-@app.get("/summary/{session_id}")
-async def get_summary(session_id: str):
-    """Get the PDF summary."""
-    data = SESSION_DATA.get(session_id)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Invalid session_id"})
-    return {"summary": data["summary"]}
-
-
-@app.get("/session/{session_id}/overview")
-async def get_session_overview(session_id: str):
-    """Get derived metadata for the transformed workspace."""
-    data = SESSION_DATA.get(session_id)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Invalid session_id"})
-    return data.get("overview", {})
-
-
-@app.get("/translate/{session_id}")
-async def get_translation(session_id: str, language: str):
-    """Translate the summary to another language."""
-    data = SESSION_DATA.get(session_id)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Invalid session_id"})
-
-    if language not in data["translations"]:
-        data["translations"][language] = translate_summary(data["summary"], language)
-    return {"language": language, "summary": data["translations"][language]}
-
-
-@app.get("/details/{session_id}")
-async def get_details(session_id: str):
-    """Get detailed explanation of the content."""
-    data = SESSION_DATA.get(session_id)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Invalid session_id"})
-
-    if not data["details"]:
-        data["details"] = generate_detailed_text(data["summary"], data["text"])
-    return {"details": data["details"]}
-
-
-@app.get("/references/{session_id}")
-async def get_refs(session_id: str):
-    """Get prerequisite topics and references."""
-    data = SESSION_DATA.get(session_id)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Invalid session_id"})
-
-    if not data["references"]:
-        data["references"] = generate_references(data["summary"])
-    return {"references": data["references"]}
-
-
-@app.get("/images/{session_id}")
-async def get_images(session_id: str):
-    """Get extracted images from PDF."""
-    data = SESSION_DATA.get(session_id)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Invalid session_id"})
-    return {
-        "images": [to_original_url(path) for path in data["images"]],
-        "labeled": data["labeled"],
-    }
-
-
-@app.get("/share-card/{session_id}")
-async def get_share_card(session_id: str):
-    """Return simple share-card metadata for the frontend."""
-    data = SESSION_DATA.get(session_id)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Invalid session_id"})
-    overview = data.get("overview", {})
-    return {
-        "session_id": session_id,
-        "file_name": overview.get("file_name"),
-        "headline": overview.get("share_card", {}).get("headline"),
-        "stats": overview.get("share_card", {}).get("stats", {}),
-        "top_concepts": overview.get("share_card", {}).get("top_concepts", []),
-    }
-
-
-@app.post("/api/generate-knowledge-graph")
-async def generate_knowledge_graph_api(request: GraphRequest):
-    """Guide-aligned graph endpoint."""
-    concepts = request.concepts
-    if request.session_id and not concepts:
-        data = SESSION_DATA.get(request.session_id)
-        if not data:
-            return JSONResponse(status_code=404, content={"error": "Invalid session_id"})
-        concepts = data.get("overview", {}).get("concepts") or ai_extract_concepts(data["summary"])
-    concepts = concepts or []
-    return build_knowledge_graph(concepts)
-
-
-@app.post("/api/detect-confusion-points")
-async def detect_confusion_points_api(request: ConfusionRequest):
-    """Guide-aligned confusion endpoint."""
-    concepts = request.concepts
-    if request.session_id and not concepts:
-        data = SESSION_DATA.get(request.session_id)
-        if not data:
-            return JSONResponse(status_code=404, content={"error": "Invalid session_id"})
-        concepts = data.get("overview", {}).get("concepts") or ai_extract_concepts(data["summary"])
-    return {"confusion_points": ai_detect_confusion_points(concepts or [])}
-
-
-@app.post("/api/generate-explanations")
-async def generate_explanations_api(request: ExplanationRequest):
-    """Guide-aligned explanation endpoint."""
-    summary = ""
-    text = ""
-    if request.session_id:
-        data = SESSION_DATA.get(request.session_id)
-        if not data:
-            return JSONResponse(status_code=404, content={"error": "Invalid session_id"})
-        summary = data["summary"]
-        text = data["text"]
-    return ai_generate_explanations(summary, text, request.concept, request.modes or ["technical"])
-
-
-@app.post("/api/create-quiz")
-async def create_quiz_api(request: QuizCreateRequest):
-    """Guide-aligned quiz creation endpoint."""
-    data = SESSION_DATA.get(request.session_id)
-    learner = LEARNER_PROFILES.get(request.session_id)
-    if not data or not learner:
-        return JSONResponse(status_code=404, content={"error": "Invalid session"})
-
-    questions = ai_create_quiz(
-        topic_name=list(learner.topics.values())[0].name if learner.topics else "Topic",
-        summary=data["summary"],
-        detailed_text=data.get("details") or "",
-        difficulty=request.difficulty,
-        question_count=request.question_count,
+    generated = cached or await generate_quiz_from_content(
+        concept.content or concept.summary or concept.name,
+        payload.difficulty,
+        payload.question_type,
     )
-    quiz_id = str(uuid.uuid4())
-    learner.quizzes[quiz_id] = questions
+    evaluation = await evaluate_answer(generated, payload.user_answer)
 
-    return {
-        "quiz_id": quiz_id,
-        "questions": [q.to_dict() for q in questions],
-        "total_questions": len(questions),
-        "difficulty": request.difficulty,
-    }
+    score = int(evaluation.get("score", 0))
+    misconceptions = evaluation.get("misconceptions", [])
+    next_difficulty = compute_next_difficulty(payload.difficulty, score)
+    mastered = payload.difficulty == "hard" and score >= 80
+    needs_simplification = payload.difficulty == "easy" and score < 50
 
-
-@app.post("/api/generate-share-card")
-async def generate_share_card_api(request: SessionRequest):
-    """Guide-aligned share card endpoint."""
-    return await get_share_card(request.session_id)
-
-
-@app.post("/api/track-analytics")
-async def track_analytics_api(request: AnalyticsEventRequest):
-    """Guide-aligned analytics tracking endpoint."""
-    event = {
-        "type": request.type,
-        "session_id": request.session_id,
-        "metadata": request.metadata,
-    }
-    tracking = analytics_track_event(event)
-    return {
-        **tracking,
-        "engagement": summarize_engagement(EVENT_LOG),
-    }
-
-
-@app.post("/images/label/{session_id}")
-async def label_images(session_id: str):
-    """Identify and label anatomical structures in extracted images."""
-    data = SESSION_DATA.get(session_id)
-    if not data:
-        return JSONResponse(status_code=404, content={"error": "Invalid session_id"})
-
-    labeled_outputs = []
-
-    for img_path in data["images"]:
-        organ_info = identify_organ(img_path)
-        organ = organ_info.get("organ", "unknown")
-        labels = organ_info.get("labels", [])
-
-        static_organ_path = get_static_organ_image(organ)
-
-        labeled_outputs.append(
-            {
-                "original": to_original_url(img_path),
-                "organ": organ,
-                "labels": labels,
-                "labeled_image": static_organ_path,
-                "labeled_image_url": to_organ_url(static_organ_path),
-                "image_generation_status": (
-                    "ok" if static_organ_path else "not_found"
-                ),
-            }
-        )
-
-    data["labeled"] = labeled_outputs
-    SESSION_DATA[session_id] = data
-
-    return {"results": labeled_outputs}
-
-
-@app.post("/identify-organ-image")
-async def identify_organ_image(file: UploadFile = File(...)):
-    """Identify organ from uploaded anatomy image."""
-    contents = await file.read()
-    ext = os.path.splitext(file.filename)[1] or ".png"
-
-    single_image_dir = os.path.join(BASE_UPLOAD_DIR, "single_images")
-    os.makedirs(single_image_dir, exist_ok=True)
-
-    image_path = os.path.join(single_image_dir, f"{uuid.uuid4()}{ext}")
-    with open(image_path, "wb") as f:
-        f.write(contents)
-
-    organ_info = identify_organ_with_static_image(image_path)
-    organ = organ_info.get("organ", "unknown")
-    labels = organ_info.get("labels", [])
-    static_image_path = organ_info.get("static_image_path")
-
-    return {
-        "organ": organ,
-        "labels": labels,
-        "original_image": to_original_url(image_path),
-        "detailed_image": static_image_path,
-        "detailed_image_url": to_organ_url(static_image_path),
-        "image_generation_status": "ok" if static_image_path else "not_found",
-    }
-
-
-# ============================================================================
-# NEW FEATURES - Enhanced Learning Platform
-# ============================================================================
-
-@app.post("/quiz/generate/{session_id}")
-async def generate_quiz(session_id: str, difficulty: str = "intermediate"):
-    """Generate AI-powered quiz questions from content."""
-    data = SESSION_DATA.get(session_id)
-    learner = LEARNER_PROFILES.get(session_id)
-
-    if not data or not learner:
-        return JSONResponse(status_code=404, content={"error": "Invalid session"})
-
-    try:
-        difficulty_level = DifficultyLevel(difficulty)
-    except ValueError:
-        difficulty_level = DifficultyLevel.INTERMEDIATE
-
-    questions = generate_quiz_from_content(
-        topic_name=list(learner.topics.values())[0].name if learner.topics else "Topic",
-        summary=data["summary"],
-        detailed_text=data.get("details", ""),
-        difficulty=difficulty_level,
-        num_questions=8
-    )
-
-    quiz_id = str(uuid.uuid4())
-    learner.quizzes[quiz_id] = questions
-
-    return {
-        "quiz_id": quiz_id,
-        "questions": [q.to_dict() for q in questions],
-        "total_questions": len(questions),
-        "difficulty": difficulty,
-    }
-
-
-@app.post("/quiz/submit/{session_id}/{quiz_id}")
-async def submit_quiz(
-    session_id: str,
-    quiz_id: str,
-    answers: List[QuizAnswerSubmission] = Body(...)
-):
-    """Submit quiz answers and receive immediate feedback."""
-    learner = LEARNER_PROFILES.get(session_id)
-    if not learner or quiz_id not in learner.quizzes:
-        return JSONResponse(status_code=404, content={"error": "Invalid session or quiz"})
-
-    questions = learner.quizzes[quiz_id]
-    total_points = 0
-    score_points = 0
-    results = []
-
-    for answer in answers:
-        question = next((q for q in questions if q.id == answer.question_id), None)
-        if not question:
-            continue
-
-        total_points += question.points
-        evaluation = evaluate_answer(question, answer.answer)
-
-        score_points += evaluation["score"]
-        results.append({
-            "question_id": answer.question_id,
-            "is_correct": evaluation["is_correct"],
-            "score": evaluation["score"],
-            "explanation": evaluation["explanation"],
-            "your_answer": answer.answer,
-            "correct_answer": evaluation["correct_answer"],
-        })
-
-    score_percentage = (score_points / total_points * 100) if total_points > 0 else 0
-
-    # Record attempt
-    topic_id = list(learner.topics.keys())[0]
     attempt = QuizAttempt(
-        quiz_id=quiz_id,
-        timestamp=datetime.now(),
-        answers={a.question_id: a.answer for a in answers},
-        score=score_percentage,
-        time_taken=sum(a.time_taken_seconds for a in answers),
-        topics_covered=[topic_id],
+        user_id=user.id,
+        chunk_id=concept.id,
+        session_id=concept.session_id,
+        difficulty=payload.difficulty,
+        score=score,
+        time_taken_ms=payload.time_taken_ms,
+        misconceptions=misconceptions,
+    )
+    db.add(attempt)
+
+    progress_stmt = select(TopicProgress).where(
+        and_(
+            TopicProgress.user_id == user.id,
+            TopicProgress.session_id == concept.session_id,
+            TopicProgress.concept_id == concept.id,
+        )
+    )
+    progress = (await db.execute(progress_stmt)).scalar_one_or_none()
+    if not progress:
+        progress = TopicProgress(user_id=user.id, session_id=concept.session_id, concept_id=concept.id, status="in_progress")
+        db.add(progress)
+
+    progress.attempt_count += 1
+    progress.score = max(progress.score, score)
+    progress.current_difficulty = next_difficulty
+    progress.needs_simplification = needs_simplification
+    progress.last_attempt_at = datetime.utcnow()
+
+    if mastered:
+        progress.status = "mastered"
+    elif score < 50 and progress.attempt_count >= 2:
+        progress.status = "struggling"
+    else:
+        progress.status = "in_progress"
+
+    if progress.status == "mastered":
+        next_stmt = select(TopicProgress).where(
+            and_(
+                TopicProgress.session_id == concept.session_id,
+                TopicProgress.user_id == user.id,
+                TopicProgress.created_at > progress.created_at,
+            )
+        ).order_by(TopicProgress.created_at.asc()).limit(1)
+        next_progress = (await db.execute(next_stmt)).scalar_one_or_none()
+        if next_progress and next_progress.status == "locked":
+            next_progress.status = "unlocked"
+
+    await maybe_infer_profile(db, user.id)
+
+    return {
+        "score": score,
+        "feedback": evaluation.get("feedback", "Here's where to focus next."),
+        "misconceptions": misconceptions,
+        "next_difficulty": next_difficulty,
+        "mastered": mastered,
+    }
+
+
+@app.post("/api/visual-query")
+async def visual_query(payload: VisualQueryRequest) -> dict[str, str]:
+    # Standalone enhancement layer: does not touch session/db logic.
+    return generate_visual_search_payload(payload.text or "")
+
+
+@app.post("/api/visual-image")
+async def visual_image(payload: VisualQueryRequest) -> dict[str, str | None]:
+    """Generate a visual query and fetch an actual image for it."""
+    text = payload.text or ""
+    # Generate the optimized search query
+    visual_payload = generate_visual_search_payload(text)
+    search_query = visual_payload.get("search_query", "")
+    
+    if not search_query:
+        return {"image_url": None, "error": "Could not generate search query", "search_query": ""}
+    
+    # Fetch the image (with fallback to placeholder)
+    image_url = await fetch_first_image(search_query)
+    
+    # fetch_first_image always returns a URL (placeholder fallback), so error is None
+    return {
+        "image_url": image_url,
+        "search_query": search_query,
+        "error": None
+    }
+
+
+@app.post("/api/cognitive-status")
+async def cognitive_status(_: CognitiveStatusRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_verified_required(request, db)
+    events = list(
+        (
+            await db.execute(
+                select(LearningEvent)
+                .where(LearningEvent.user_id == user.id)
+                .order_by(LearningEvent.created_at.desc())
+                .limit(10)
+            )
+        ).scalars().all()
     )
 
-    learner.topic_progress[topic_id].quiz_attempts.append(attempt)
-    learner.topic_progress[topic_id].best_quiz_score = max(
-        learner.topic_progress[topic_id].best_quiz_score,
-        score_percentage
+    if not events:
+        return {"status": "optimal", "message": "In the zone", "action": None}
+
+    overload = 0
+    underload = 0
+
+    chunk_visits: dict[str, int] = {}
+    recall_scores: list[float] = []
+
+    for e in events:
+        p = e.payload or {}
+        time_ms = float(p.get("time_on_chunk_ms", 0))
+        estimated_minutes = float(p.get("estimated_minutes", 5))
+
+        if time_ms > estimated_minutes * 60_000 * 3:
+            overload += 1
+        if time_ms and time_ms < estimated_minutes * 60_000 * 0.4:
+            underload += 1
+
+        cid = e.chunk_id or ""
+        if cid:
+            chunk_visits[cid] = chunk_visits.get(cid, 0) + (1 if e.event_type == "revisit" else 0)
+
+        score = p.get("score")
+        if isinstance(score, (int, float)):
+            recall_scores.append(float(score))
+
+    if any(v > 2 for v in chunk_visits.values()):
+        overload += 1
+
+    if len(recall_scores) >= 3 and recall_scores[0] < recall_scores[1] < recall_scores[2]:
+        overload += 1
+    if len(recall_scores) >= 3 and min(recall_scores) >= 85:
+        underload += 1
+
+    if overload >= 2:
+        return {
+            "status": "overloaded",
+            "message": "Slow down - your brain needs a moment",
+            "action": "Take a 5 min break",
+        }
+
+    recent_cutoff = datetime.utcnow() - timedelta(minutes=25)
+    recent_chunks_stmt = select(func.count(LearningEvent.id)).where(
+        and_(
+            LearningEvent.user_id == user.id,
+            LearningEvent.created_at >= recent_cutoff,
+            LearningEvent.event_type.in_(["view_end", "quiz_submit", "recall_attempt"]),
+        )
     )
-    learner.topic_progress[topic_id].completion_percentage = min(
-        learner.topic_progress[topic_id].completion_percentage + 20, 100
-    )
+    recent_activity = int((await db.execute(recent_chunks_stmt)).scalar() or 0)
+    if recent_activity >= 6:
+        return {
+            "status": "overloaded",
+            "message": "You've been at this for a while. A break now will help you remember more.",
+            "action": "Take a 5 min break",
+        }
 
-    return {
-        "quiz_id": quiz_id,
-        "score": round(score_percentage, 2),
-        "max_points": total_points,
-        "earned_points": score_points,
-        "mastery_level": learner.topic_progress[topic_id].get_mastery_level(),
-        "results": results,
-        "feedback": f"You scored {score_percentage:.1f}%! " + (
-            "Excellent work! Keep it up!" if score_percentage >= 90
-            else "Good effort! Review the material and try again." if score_percentage >= 70
-            else "Keep practicing to strengthen your understanding."
-        ),
-    }
+    if underload >= 2:
+        return {
+            "status": "cruising",
+            "message": "You're moving fast - want harder content?",
+            "action": "Switch to hard",
+        }
 
-
-@app.post("/notes/add/{session_id}")
-async def add_note(session_id: str, note: NoteData):
-    """Add study notes to a topic."""
-    learner = LEARNER_PROFILES.get(session_id)
-    if not learner or note.topic_id not in learner.topic_progress:
-        return JSONResponse(status_code=404, content={"error": "Invalid session or topic"})
-
-    learner.topic_progress[note.topic_id].notes += f"\n{note.text}"
-    return {"status": "success", "notes_length": len(learner.topic_progress[note.topic_id].notes)}
+    return {"status": "optimal", "message": "In the zone", "action": None}
 
 
-@app.post("/bookmark/add/{session_id}")
-async def add_bookmark(session_id: str, bookmark: BookmarkData):
-    """Bookmark important content for quick reference."""
-    learner = LEARNER_PROFILES.get(session_id)
-    if not learner or bookmark.topic_id not in learner.topic_progress:
-        return JSONResponse(status_code=404, content={"error": "Invalid session or topic"})
+@app.post("/api/next-steps")
+async def next_steps(payload: NextStepsRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await get_current_user_verified_required(request, db)
+    if payload.user_id and payload.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
-    learner.topic_progress[bookmark.topic_id].bookmarks.append({
-        "content": bookmark.content,
-        "position": bookmark.position,
-        "timestamp": datetime.now().isoformat(),
-    })
-
-    return {
-        "status": "success",
-        "bookmarks_count": len(learner.topic_progress[bookmark.topic_id].bookmarks)
-    }
-
-
-@app.get("/dashboard/{session_id}")
-async def learning_dashboard(session_id: str):
-    """Get comprehensive learning dashboard and progress overview."""
-    learner = LEARNER_PROFILES.get(session_id)
-    if not learner:
-        return JSONResponse(status_code=404, content={"error": "Invalid session"})
-
-    learner.calculate_overall_progress()
-    stats = learner.get_dashboard_stats()
-    recommendations = LearningAnalytics.get_study_recommendations(learner)
-    velocity = LearningAnalytics.get_learning_velocity(learner)
-    weak_areas = LearningAnalytics.identify_weak_areas(learner)
-
-    return {
-        "session_id": session_id,
-        "stats": stats,
-        "velocity": velocity,
-        "recommendations": recommendations,
-        "weak_areas": weak_areas,
-        "study_plan": LearningAnalytics.generate_study_plan(learner, weeks=4),
-    }
-
-
-@app.get("/progress/{session_id}/{topic_id}")
-async def topic_progress(session_id: str, topic_id: str):
-    """Get detailed progress on a specific topic."""
-    learner = LEARNER_PROFILES.get(session_id)
-    if not learner or topic_id not in learner.topic_progress:
-        return JSONResponse(status_code=404, content={"error": "Invalid session or topic"})
-
-    progress = learner.topic_progress[topic_id]
-    topic = learner.topics.get(topic_id)
-
-    spaced_rep = LearningAnalytics.get_spaced_repetition_schedule(progress)
-    mastery_prob = LearningAnalytics.estimate_mastery_probability(
-        progress.best_quiz_score,
-        len(progress.quiz_attempts),
-        (datetime.now() - progress.last_viewed).days,
+    progress = list(
+        (
+            await db.execute(
+                select(TopicProgress, Concept)
+                .join(Concept, Concept.id == TopicProgress.concept_id)
+                .where(and_(TopicProgress.user_id == user.id, TopicProgress.session_id == payload.session_id))
+                .order_by(Concept.order_index.asc())
+            )
+        ).all()
     )
 
-    return {
-        "topic_id": topic_id,
-        "topic_name": topic.name if topic else topic_id,
-        "progress": progress.to_dict(),
-        "spaced_repetition": spaced_rep,
-        "mastery_probability": mastery_prob,
-        "next_difficulty": LearningAnalytics.get_difficulty_recommendation(progress).value,
-        "notes_preview": progress.notes[:200] if progress.notes else "",
-        "bookmarks_count": len(progress.bookmarks),
-    }
+    weak = [row for row in progress if row[0].score < 50 and row[0].attempt_count >= 2]
+    unlocked = [row for row in progress if row[0].status == "unlocked"]
+    done = [row for row in progress if row[0].status == "mastered"]
+    remaining = [row for row in progress if row[0].status != "mastered"]
 
+    if weak:
+        primary = f"Revisit {weak[0][1].name} - you're close"
+    elif unlocked:
+        primary = f"Continue to {unlocked[0][1].name}"
+    elif remaining:
+        primary = "Strengthen weak areas before finishing"
+    else:
+        avg_mastery = sum(r[0].score for r in progress) / max(1, len(progress))
+        if avg_mastery >= 80:
+            primary = "You've mastered this document. Want to test yourself on the full set?"
+        else:
+            primary = "Strengthen weak areas before finishing"
 
-@app.post("/assessment/diagnostic/{session_id}")
-async def diagnostic_assessment(session_id: str):
-    """Generate diagnostic assessment to identify knowledge gaps."""
-    data = SESSION_DATA.get(session_id)
-    learner = LEARNER_PROFILES.get(session_id)
+    profile = await ensure_profile(db, user.id)
+    velocity = max(0.4, profile.learning_velocity or 1.0)
+    estimated = int(sum((r[1].estimated_minutes or 5.0) for r in remaining) / velocity)
 
-    if not data or not learner:
-        return JSONResponse(status_code=404, content={"error": "Invalid session"})
-
-    questions = generate_knowledge_gap_assessment(
-        topic_name=list(learner.topics.values())[0].name if learner.topics else "Topic",
-        summary=data["summary"],
-    )
-
-    assessment_id = str(uuid.uuid4())
-    learner.quizzes[assessment_id] = questions
+    secondary = [f"Review {r[1].name}" for r in remaining[:3]]
 
     return {
-        "assessment_id": assessment_id,
-        "questions": [q.to_dict() for q in questions],
-        "purpose": "This diagnostic assessment helps identify knowledge gaps and misconceptions",
+        "primary_action": primary,
+        "secondary_actions": secondary,
+        "estimated_minutes_remaining": max(0, estimated),
     }
 
 
-@app.get("/learning-path/{session_id}")
-async def get_learning_path(session_id: str):
-    """Get personalized learning path based on prerequisites and progress."""
-    learner = LEARNER_PROFILES.get(session_id)
-    if not learner:
-        return JSONResponse(status_code=404, content={"error": "Invalid session"})
-
-    path = LearningAnalytics.get_learning_path(learner)
-    next_topics = [p for p in path if p["prerequisites_met"]][:3]
-
-    return {
-        "current_progress": learner.overall_completion_percentage,
-        "recommended_next_topics": next_topics,
-        "all_available_topics": path,
-        "next_review_topics": learner.get_next_review_topics(),
-    }
+@app.get("/favicon.ico")
+async def favicon():
+    return Response(status_code=204)
 
 
-@app.post("/session/new")
-async def create_learning_session():
-    """Create a new learning session without uploading a PDF."""
-    session_id = str(uuid.uuid4())
+@app.get("/", response_class=HTMLResponse)
+async def landing_page(request: Request):
+    response = templates.TemplateResponse("landing.html", {"request": request})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
-    SESSION_DATA[session_id] = {
-        "pdf_path": None,
-        "text": "",
-        "summary": "",
-        "images": [],
-        "translations": {},
-        "details": None,
-        "references": None,
-        "labeled": [],
-    }
 
-    learner = LearnerProfile(session_id=session_id, created_at=datetime.now())
-    LEARNER_PROFILES[session_id] = learner
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    response = templates.TemplateResponse("login.html", {"request": request})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
-    return {"session_id": session_id, "status": "Learning session created"}
+
+@app.get("/signup", response_class=HTMLResponse)
+async def signup_page(request: Request):
+    response = templates.TemplateResponse("signup.html", {"request": request})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page(request: Request, db: AsyncSession = Depends(get_db)):
+    maybe = await _redirect_if_anon("/dashboard", request, db)
+    if maybe:
+        return maybe
+    response = templates.TemplateResponse("dashboard.html", {"request": request})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/upload", response_class=HTMLResponse)
+async def upload_page(request: Request, db: AsyncSession = Depends(get_db)):
+    maybe = await _redirect_if_anon("/upload", request, db)
+    if maybe:
+        return maybe
+    response = templates.TemplateResponse("upload.html", {"request": request})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/analytics", response_class=HTMLResponse)
+async def analytics_page(request: Request, db: AsyncSession = Depends(get_db)):
+    maybe = await _redirect_if_anon("/analytics", request, db)
+    if maybe:
+        return maybe
+    response = templates.TemplateResponse("analytics.html", {"request": request})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, db: AsyncSession = Depends(get_db)):
+    maybe = await _redirect_if_anon("/settings", request, db)
+    if maybe:
+        return maybe
+    response = templates.TemplateResponse("settings.html", {"request": request})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/learn/{session_id}", response_class=HTMLResponse)
+async def learn_page(session_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    maybe = await _redirect_if_anon(f"/learn/{session_id}", request, db)
+    if maybe:
+        return maybe
+    response = templates.TemplateResponse("learn.html", {"request": request, "session_id": session_id, "view": "summary"})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/learn/{session_id}/quiz", response_class=HTMLResponse)
+async def learn_quiz_page(session_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    maybe = await _redirect_if_anon(f"/learn/{session_id}/quiz", request, db)
+    if maybe:
+        return maybe
+    response = templates.TemplateResponse("learn.html", {"request": request, "session_id": session_id, "view": "quiz"})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/learn/{session_id}/details", response_class=HTMLResponse)
+async def learn_details_page(session_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    maybe = await _redirect_if_anon(f"/learn/{session_id}/details", request, db)
+    if maybe:
+        return maybe
+    response = templates.TemplateResponse("learn.html", {"request": request, "session_id": session_id, "view": "details"})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint for system status."""
-    return {
-        "status": "healthy",
-        "app": "EduVision Medical Learning Platform",
-        "active_sessions": len(LEARNER_PROFILES),
-        "features": [
-            "PDF extraction",
-            "AI summarization",
-            "Quiz generation",
-            "Progress tracking",
-            "Spaced repetition",
-            "Analytics",
-        ],
-    }
+async def health_check(db: AsyncSession = Depends(get_db)):
+    users = int((await db.execute(select(func.count(User.id)))).scalar() or 0)
+    sessions = int((await db.execute(select(func.count(LearningSession.id)))).scalar() or 0)
+    return {"status": "healthy", "app": "EduVision", "users": users, "sessions": sessions}

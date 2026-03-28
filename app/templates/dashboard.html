@@ -1,0 +1,69 @@
+{% extends "layout.html" %}
+{% block title %}Dashboard — EduVision{% endblock %}
+
+{% block content %}
+  <div class="container" data-dashboard>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="card">
+          <div class="card-inner">
+            <div style="font-weight:900; letter-spacing:-0.02em;">My Learning</div>
+            <div class="muted" style="margin-top:.25rem;">Your next steps, beautifully organized.</div>
+          </div>
+        </div>
+        <a class="side-item active" href="/dashboard"><span style="font-weight:800;">📚 Dashboard</span><span class="badge">Home</span></a>
+        <a class="side-item" href="/analytics"><span style="font-weight:800;">📊 Analytics</span><span class="muted" style="font-size:.85rem;">Insights</span></a>
+        <a class="side-item" href="/settings"><span style="font-weight:800;">⚙️ Settings</span><span class="muted" style="font-size:.85rem;">You</span></a>
+        <a class="side-item" href="/upload"><span style="font-weight:800;">💎 Upload</span><span class="muted" style="font-size:.85rem;">New</span></a>
+      </aside>
+
+      <section class="content">
+        <div class="card reveal">
+          <div class="card-inner">
+            <div style="font-weight:900; font-size:1.35rem; letter-spacing:-0.03em;" data-welcome>Welcome back!</div>
+            <div class="muted" style="margin-top:.5rem; line-height:1.6;">Pick up where you left off—your progress is waiting.</div>
+            <div style="margin-top:1.5rem;" class="hstack">
+              <a class="btn btn-primary btn-sm" data-ripple href="/upload">Upload new PDF</a>
+              <a class="btn btn-secondary btn-sm" data-ripple href="/upload">Continue learning</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid" style="grid-template-columns: 1.4fr 0.9fr; gap:1.25rem;">
+          <div class="card reveal">
+            <div class="card-inner">
+              <div style="font-weight:900; font-size:1.1rem;">Your learning journey</div>
+              <div class="muted" style="margin-top:.35rem; font-size:.95rem;">Recent documents with animated progress.</div>
+              <div data-docs style="display:grid; gap:1rem; margin-top:1.25rem;">
+                <div class="skeleton" style="height:90px;"></div>
+                <div class="skeleton" style="height:90px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid" style="gap:1.25rem;">
+            <div class="card reveal">
+              <div class="card-inner">
+                <div style="font-weight:900; font-size:1.1rem;">At-risk knowledge</div>
+                <div class="muted" style="margin-top:.35rem; font-size:.95rem;">AI-detected concepts worth a quick review.</div>
+                <div data-risk style="display:grid; gap:.75rem; margin-top:1rem;">
+                  <div class="skeleton" style="height:56px;"></div>
+                  <div class="skeleton" style="height:56px;"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card reveal">
+              <div class="card-inner" data-rec>
+                <div class="skeleton" style="height:20px; width:55%;"></div>
+                <div class="skeleton" style="height:14px; width:95%; margin-top:.8rem;"></div>
+                <div class="skeleton" style="height:36px; width:46%; margin-top:1.25rem; border-radius:999px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+{% endblock %}
+

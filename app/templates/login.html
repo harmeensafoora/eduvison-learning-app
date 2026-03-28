@@ -1,0 +1,42 @@
+{% extends "layout.html" %}
+{% block title %}Login — EduVision{% endblock %}
+
+{% block content %}
+  <section style="padding:3rem 0 4rem;">
+    <div class="container" style="display:grid; place-items:center;">
+      <div class="card reveal" style="width:min(520px, 100%);">
+        <div class="card-inner">
+          <div style="text-align:center;">
+            <div class="badge" style="margin-inline:auto;">Welcome back</div>
+            <div style="margin-top:1rem; font-weight:900; font-size:1.6rem; letter-spacing:-0.03em;">Login to EduVision</div>
+            <div class="muted" style="margin-top:.5rem; font-size:.95rem;">Smooth, secure, and fast.</div>
+          </div>
+
+          <form data-auth-form="login" style="margin-top:1.75rem; display:grid; gap:1rem;">
+            <div class="field" data-field>
+              <label class="label" for="email">Email</label>
+              <input class="input input-auth" id="email" name="email" type="email" autocomplete="email" required />
+              <div class="error-text" data-error></div>
+            </div>
+            <div class="field" data-field>
+              <label class="label" for="password">Password</label>
+              <input class="input input-auth" id="password" name="password" type="password" autocomplete="current-password" required />
+              <div class="error-text" data-error></div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:1.25rem; flex-wrap:wrap; margin-top:.5rem;">
+              <a class="muted" data-reset-link href="#" style="font-size:.9rem; text-decoration:underline; transition: color var(--transition-base);">Forgot password?</a>
+              <a class="muted" href="/signup" style="font-size:.9rem; text-decoration:underline; transition: color var(--transition-base);">Create account</a>
+            </div>
+
+            <button class="btn btn-primary btn-lg" data-ripple type="submit">Continue</button>
+            <div class="muted" style="text-align:center; font-size:.95rem; margin-top:.5rem;">
+              Don't have an account? <a href="/signup" style="font-weight:800; color: var(--ink); transition: color var(--transition-base);">Create one</a>
+            </div>
+            <div class="muted" data-verify-hint style="display:none; font-size:.85rem; word-break:break-all;"></div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+{% endblock %}

@@ -5,3 +5,12 @@ python-multipart
 pypdf
 pymupdf
 openai
+sqlalchemy[asyncio]
+asyncpg
+psycopg2-binary
+aiosqlite
+alembic
+python-jose[cryptography]
+passlib[bcrypt]
+httpx
+pydantic[email]

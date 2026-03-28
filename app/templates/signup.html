@@ -1,0 +1,48 @@
+{% extends "layout.html" %}
+{% block title %}Sign up — EduVision{% endblock %}
+
+{% block content %}
+  <section style="padding:3rem 0 4rem;">
+    <div class="container" style="display:grid; place-items:center;">
+      <div class="card reveal" style="width:min(520px, 100%);">
+        <div class="card-inner">
+          <div style="text-align:center;">
+            <div class="badge" style="margin-inline:auto;">Try for free</div>
+            <div style="margin-top:1rem; font-weight:900; font-size:1.6rem; letter-spacing:-0.03em;">Create your account</div>
+            <div class="muted" style="margin-top:.5rem; font-size:.95rem;">Start learning in under a minute.</div>
+          </div>
+
+          <form data-auth-form="signup" style="margin-top:1.75rem; display:grid; gap:1rem;">
+            <div class="field" data-field>
+              <label class="label" for="display_name">Name</label>
+              <input class="input input-auth" id="display_name" name="display_name" type="text" autocomplete="name" placeholder="Harmeen" />
+              <div class="error-text" data-error></div>
+            </div>
+            <div class="field" data-field>
+              <label class="label" for="email">Email</label>
+              <input class="input input-auth" id="email" name="email" type="email" autocomplete="email" required />
+              <div class="error-text" data-error></div>
+            </div>
+            <div class="field" data-field>
+              <label class="label" for="password">Password</label>
+              <input class="input input-auth" id="password" name="password" type="password" autocomplete="new-password" required />
+              <div class="help" data-strength style="display:none;">
+                Strength: <span data-strength-label>—</span>
+                <span style="display:block; height:8px; border-radius:999px; background:rgb(17 24 39 / 0.08); overflow:hidden; margin-top:.45rem;">
+                  <span data-strength-fill style="display:block; height:100%; width:0%; border-radius:999px;"></span>
+                </span>
+              </div>
+              <div class="error-text" data-error></div>
+            </div>
+
+            <button class="btn btn-primary btn-lg" data-ripple type="submit">Continue</button>
+            <div class="muted" style="text-align:center; font-size:.95rem; margin-top:.5rem;">
+              Already have an account? <a href="/login" style="font-weight:800; color: var(--ink); transition: color var(--transition-base);">Login</a>
+            </div>
+            <div class="muted" data-verify-hint style="display:none; font-size:.85rem; word-break:break-all;"></div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+{% endblock %}

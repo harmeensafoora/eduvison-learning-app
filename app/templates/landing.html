@@ -1,0 +1,200 @@
+{% extends "layout.html" %}
+{% block title %}EduVision — Learn smarter{% endblock %}
+
+{% block content %}
+  <section class="hero" data-hero>
+    <div class="floaty" aria-hidden="true">
+      <div class="orb o1" data-hero-parallax data-depth="0.9"></div>
+      <div class="orb o2" data-hero-parallax data-depth="0.6"></div>
+      <div class="orb o3" data-hero-parallax data-depth="1.1"></div>
+    </div>
+
+    <div class="container hero-grid">
+      <div>
+        <div class="hero-eyebrow reveal">
+          <div class="hero-eyebrow-dot"></div>
+          AI-powered adaptive learning
+        </div>
+
+        <h1 class="hero-headline reveal">
+          Learning that<br />
+          <em>thinks</em> like<br />
+          you do.
+        </h1>
+
+        <p class="hero-sub reveal">
+          Upload any document. EduVision maps concepts, builds a path, and adapts to how your brain learns — no setup required.
+        </p>
+
+        <div class="hero-actions reveal">
+          <a class="btn btn-primary btn-lg btn-pulse" data-ripple href="/upload">Upload a PDF — free</a>
+          <a class="btn btn-secondary btn-lg" data-ripple href="#how-it-works">See how it works</a>
+        </div>
+      </div>
+
+      <div class="hero-card-wrap reveal">
+        <div class="hero-float f1">✓ Concept mastered</div>
+
+        <div class="hero-card" data-hero-parallax data-depth="1.4">
+          <div class="hero-card-topbar">
+            <div class="hc-dot hc-dot-r"></div>
+            <div class="hc-dot hc-dot-y"></div>
+            <div class="hc-dot hc-dot-g"></div>
+            <span class="hero-card-topbar-title">Your Learning Map</span>
+          </div>
+          <div class="hero-card-body">
+            <div class="hc-label">Concept path</div>
+            <div class="hc-concept-list">
+              <div class="hc-concept done"><div class="hc-concept-icon">✓</div> Fundamentals</div>
+              <div class="hc-concept active"><div class="hc-concept-icon">→</div> Core Concepts</div>
+              <div class="hc-concept locked"><div class="hc-concept-icon">🔒</div> Advanced Topics</div>
+              <div class="hc-concept locked"><div class="hc-concept-icon">🔒</div> Synthesis</div>
+            </div>
+            <div class="hc-progress-area">
+              <div class="hc-progress-label"><span>Progress</span><span>62%</span></div>
+              <div class="hc-progress-bar"><div class="hc-progress-fill"></div></div>
+            </div>
+            <div class="hc-tip">💡 Based on your pace, review Fundamentals before moving on. You’re doing great — 94% accuracy so far.</div>
+          </div>
+        </div>
+
+        <div class="hero-float f2">⚡ 94% accuracy</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="marquee-strip" aria-hidden="true">
+    <div class="marquee-track">
+      <span>Adaptive Learning</span><span class="sep">✦</span>
+      <span>Concept Mapping</span><span class="sep">✦</span>
+      <span>Spaced Repetition</span><span class="sep">✦</span>
+      <span>AI-Generated Quizzes</span><span class="sep">✦</span>
+      <span>Progress Analytics</span><span class="sep">✦</span>
+      <span>Knowledge Gaps</span><span class="sep">✦</span>
+      <span>Personalized Paths</span><span class="sep">✦</span>
+      <span>Adaptive Learning</span><span class="sep">✦</span>
+      <span>Concept Mapping</span><span class="sep">✦</span>
+      <span>Spaced Repetition</span><span class="sep">✦</span>
+      <span>AI-Generated Quizzes</span><span class="sep">✦</span>
+      <span>Progress Analytics</span><span class="sep">✦</span>
+      <span>Knowledge Gaps</span><span class="sep">✦</span>
+      <span>Personalized Paths</span><span class="sep">✦</span>
+    </div>
+  </div>
+
+  <section id="features" style="padding:4.25rem 0 2.5rem;">
+    <div class="container">
+      <div class="reveal" style="display:flex; justify-content:space-between; align-items:end; gap:1rem; flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:900; font-size:1.5rem; letter-spacing:-0.02em;">How it works</div>
+          <div class="muted" style="margin-top:.35rem;">Progressive disclosure: the right info at the right time.</div>
+        </div>
+        <a class="btn btn-ghost btn-sm" data-ripple href="/upload">Start with a PDF →</a>
+      </div>
+
+      <div class="feature-grid" style="margin-top:1.15rem;">
+        <div class="card hoverable reveal">
+          <div class="card-inner">
+            <div class="feature-icon" aria-hidden="true">📄</div>
+            <div style="margin-top:.75rem; font-weight:900;">Upload</div>
+            <div class="muted" style="margin-top:.25rem;">Drag & drop your PDF. We’ll handle the rest.</div>
+          </div>
+        </div>
+        <div class="card hoverable reveal">
+          <div class="card-inner">
+            <div class="feature-icon" aria-hidden="true">🧠</div>
+            <div style="margin-top:.75rem; font-weight:900;">Learn</div>
+            <div class="muted" style="margin-top:.25rem;">Concepts, summaries, and quizzes that adapt to you.</div>
+          </div>
+        </div>
+        <div class="card hoverable reveal">
+          <div class="card-inner">
+            <div class="feature-icon" aria-hidden="true">🏁</div>
+            <div style="margin-top:.75rem; font-weight:900;">Master</div>
+            <div class="muted" style="margin-top:.25rem;">See what’s at risk, review, and lock it in.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:1.8rem;">
+        <div style="font-weight:900; font-size:1.3rem; letter-spacing:-0.02em;">Features students actually love</div>
+        <div class="muted" style="margin-top:.35rem;">Micro-interactions everywhere: hover-lift, shimmer, soft feedback.</div>
+      </div>
+      <div class="feature-grid" style="margin-top:1rem;">
+        <div class="card hoverable reveal"><div class="card-inner"><div style="font-weight:900;">Adaptive quiz</div><div class="muted" style="margin-top:.25rem;">Difficulty adjusts with your performance.</div></div></div>
+        <div class="card hoverable reveal"><div class="card-inner"><div style="font-weight:900;">Detailed deep-dives</div><div class="muted" style="margin-top:.25rem;">Expand only when you need it.</div></div></div>
+        <div class="card hoverable reveal"><div class="card-inner"><div style="font-weight:900;">Cognitive load</div><div class="muted" style="margin-top:.25rem;">Gentle “take a break” nudges when it helps.</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="pricing" style="padding:2.25rem 0 3rem;">
+    <div class="container">
+      <div class="reveal" style="display:flex; justify-content:space-between; align-items:end; gap:1rem; flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:900; font-size:1.5rem; letter-spacing:-0.02em;">Pricing</div>
+          <div class="muted" style="margin-top:.35rem;">Start free. Upgrade when you’re ready.</div>
+        </div>
+      </div>
+
+      <div class="pricing-grid" style="margin-top:1.5rem;">
+        <div class="card hoverable reveal">
+          <div class="card-inner">
+            <div class="badge">Free</div>
+            <div class="price" style="margin-top:.6rem;">₹0</div>
+            <div class="muted" style="margin-top:.25rem;">Try the core learning path.</div>
+            <div style="margin-top:1rem; display:grid; gap:.35rem;" class="muted">
+              <div>• 5 PDFs / month</div>
+              <div>• Summary + quiz</div>
+              <div>• Basic insights</div>
+            </div>
+            <div style="margin-top:1.1rem;">
+              <a class="btn btn-secondary btn-sm" data-ripple href="/signup">Get started</a>
+            </div>
+          </div>
+        </div>
+        <div class="card hoverable reveal" style="border-color:color-mix(in srgb, var(--color-mint) 40%, rgb(17 24 39 / 0.08) 60%);">
+          <div class="card-inner">
+            <div class="badge">Popular</div>
+            <div style="margin-top:.55rem; font-weight:900;">Student</div>
+            <div class="price" style="margin-top:.35rem;">₹599<span class="muted" style="font-size:1rem;">/mo</span></div>
+            <div class="muted" style="margin-top:.25rem;">Unlimited learning momentum.</div>
+            <div style="margin-top:1rem; display:grid; gap:.35rem;" class="muted">
+              <div>• Unlimited PDFs</div>
+              <div>• Priority processing</div>
+              <div>• Advanced analytics</div>
+            </div>
+            <div style="margin-top:1.1rem;">
+              <a class="btn btn-primary btn-sm" data-ripple href="/signup">Upgrade</a>
+            </div>
+          </div>
+        </div>
+        <div class="card hoverable reveal">
+          <div class="card-inner">
+            <div class="badge">Pro</div>
+            <div class="price" style="margin-top:.6rem;">₹999<span class="muted" style="font-size:1rem;">/mo</span></div>
+            <div class="muted" style="margin-top:.25rem;">For power learners and teams.</div>
+            <div style="margin-top:1rem; display:grid; gap:.35rem;" class="muted">
+              <div>• Everything in Student</div>
+              <div>• Tutor mode</div>
+              <div>• Export + reports</div>
+            </div>
+            <div style="margin-top:1.1rem;">
+              <a class="btn btn-secondary btn-sm" data-ripple href="/signup">Contact us</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card reveal" style="margin-top:1.75rem;">
+        <div class="card-inner" style="display:flex; justify-content:space-between; gap:1.5rem; flex-wrap:wrap; align-items:center;">
+          <div>
+            <div style="font-weight:900; font-size:1.25rem; letter-spacing:-0.02em;">Start learning smarter today</div>
+            <div class="muted" style="margin-top:.5rem; font-size:.95rem; line-height:1.6;">Your next study session can feel effortless.</div>
+          </div>
+          <a class="btn btn-primary btn-lg" data-ripple href="/signup">Try for free</a>
+        </div>
+      </div>
+    </div>
+  </section>
+{% endblock %}

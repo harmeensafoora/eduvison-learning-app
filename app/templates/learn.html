@@ -1,0 +1,190 @@
+{% extends "layout.html" %}
+{% block title %}Learn — EduVision{% endblock %}
+
+{% block content %}
+  <section style="padding:1.5rem 0 2.75rem;">
+    <div class="container" data-learn data-session-id="{{ session_id }}" data-view="{{ view }}">
+      <div class="card reveal">
+        <div class="card-inner" style="display:flex; justify-content:space-between; align-items:center; gap:1.5rem; flex-wrap:wrap;">
+          <div>
+            <a class="btn btn-ghost btn-sm" data-ripple href="/dashboard">← Back</a>
+            <div style="margin-top:.75rem; font-weight:900; font-size:1.5rem; letter-spacing:-0.03em;" data-learn-title>Loading…</div>
+            <div style="margin-top:1rem;" class="hstack" data-learn-meta></div>
+          </div>
+          <div style="min-width:min(360px, 100%);">
+            <div class="muted" style="font-size:.9rem; display:flex; justify-content:space-between;">
+              <span>Progress</span>
+              <span><span data-mastery-label>0%</span> mastery</span>
+            </div>
+            <div class="progressbar" style="margin-top:.65rem;"><div data-mastery-bar></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card reveal" style="margin-top:1.25rem;">
+        <div class="card-inner" style="display:flex; gap:.75rem; flex-wrap:wrap;">
+          <a class="side-item active" data-step="summary" href="/learn/{{ session_id }}" style="padding:.65rem .85rem; border-radius:999px;">1️⃣ Summary</a>
+          <a class="side-item" data-step="quiz" href="/learn/{{ session_id }}/quiz" style="padding:.65rem .85rem; border-radius:999px;">2️⃣ Quiz</a>
+          <a class="side-item" data-step="details" href="/learn/{{ session_id }}/details" style="padding:.65rem .85rem; border-radius:999px;">3️⃣ Details</a>
+        </div>
+      </div>
+
+      <div class="grid" style="grid-template-columns: 1.35fr 0.65fr; gap:1.25rem; margin-top:1.25rem;">
+        <div class="grid" style="gap:1.25rem;">
+          <div class="card reveal" data-panel="summary">
+            <div class="card-inner">
+              <div style="font-weight:900; font-size:1.1rem;">Smart summary</div>
+              <div class="muted" style="margin-top:.35rem; font-size:.95rem;">Expand concepts as needed—never overwhelming.</div>
+              <div data-learn-summary class="muted" style="margin-top:1.25rem; line-height:1.7;"></div>
+              <div style="margin-top:1.25rem; display:grid; gap:1rem;" data-learn-concepts></div>
+            </div>
+          </div>
+
+          <div class="card reveal" data-panel="quiz" style="display:none;">
+            <div class="card-inner">
+              <div style="font-weight:900; font-size:1.1rem;">Adaptive quiz</div>
+              <div class="muted" style="margin-top:.35rem; font-size:.95rem;">Quick checks to warm up, then generate an adaptive question per concept.</div>
+
+              <div class="card" style="margin-top:1.25rem;">
+                <div class="card-inner">
+                  <div style="font-weight:900;">Quick check</div>
+                  <div class="muted" style="margin-top:.25rem; font-size:.9rem;">A few high-signal questions based on your summary.</div>
+                  <div data-check-questions style="display:grid; gap:.75rem; margin-top:1rem;">
+                    <div class="skeleton" style="height:54px;"></div>
+                    <div class="skeleton" style="height:54px;"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card" style="margin-top:1.25rem;">
+                <div class="card-inner">
+                  <div style="font-weight:900;">Generate a quiz question</div>
+                  <div class="muted" style="margin-top:.25rem; font-size:.9rem;">Choose a concept, pick difficulty, and go.</div>
+
+                  <div class="grid" style="grid-template-columns: 1fr 180px; gap:1rem; margin-top:1rem;">
+                    <div class="field">
+                      <label class="label" for="concept_sel">Concept</label>
+                      <select class="input" id="concept_sel" data-quiz-concept></select>
+                    </div>
+                    <div class="field">
+                      <label class="label" for="diff_sel">Difficulty</label>
+                      <select class="input" id="diff_sel" data-quiz-diff>
+                        <option value="easy">Easy</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="hard">Hard</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="field" style="margin-top:1rem;">
+                    <label class="label" for="type_sel">Question type</label>
+                    <select class="input" id="type_sel" data-quiz-type>
+                      <option value="" selected>Auto</option>
+                      <option value="one_word">One word</option>
+                      <option value="one_sentence">One sentence</option>
+                      <option value="fill_blank">Fill in the blanks</option>
+                      <option value="mcq">MCQ</option>
+                    </select>
+                  </div>
+
+                  <div style="margin-top:1.25rem;" class="hstack">
+                    <button class="btn btn-primary btn-sm" data-ripple data-quiz-generate type="button">Generate</button>
+                    <span class="muted" data-quiz-status style="font-size:.9rem;"></span>
+                  </div>
+
+                  <div class="card" style="margin-top:1.25rem;">
+                    <div class="card-inner">
+                      <div class="muted" style="font-size:.85rem;">Question</div>
+                      <div data-quiz-question style="margin-top:.5rem; font-weight:900;">—</div>
+                      <div data-quiz-options style="display:none; margin-top:1rem; gap:.65rem;"></div>
+                      <div class="field" style="margin-top:1rem;">
+                        <label class="label" for="answer">Your answer</label>
+                        <textarea class="input input-soft" id="answer" rows="3" data-quiz-answer placeholder="Type your answer…"></textarea>
+                      </div>
+                      <div style="margin-top:1rem;" class="hstack">
+                        <button class="btn btn-secondary btn-sm" data-ripple data-quiz-submit type="button">Check answer</button>
+                        <span class="badge" data-quiz-score style="display:none;"></span>
+                      </div>
+                      <div data-quiz-feedback class="muted" style="margin-top:.85rem; line-height:1.6;"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card reveal" data-panel="details" style="display:none;">
+            <div class="card-inner">
+              <div style="font-weight:900; font-size:1.1rem;">Deep details</div>
+              <div class="muted" style="margin-top:.35rem; font-size:.95rem;">When you want more depth, EduVision expands gently.</div>
+
+              <div class="card" style="margin-top:1.25rem;">
+                <div class="card-inner">
+                  <div style="font-weight:900;">Detailed summary</div>
+                  <div class="muted" style="margin-top:.25rem; font-size:.9rem;">Loads on demand (with friendly loading states).</div>
+                  <div data-detailed class="muted" style="margin-top:1rem; line-height:1.7;">
+                    <div class="skeleton" style="height:14px; width:95%;"></div>
+                    <div class="skeleton" style="height:14px; width:90%; margin-top:.75rem;"></div>
+                    <div class="skeleton" style="height:14px; width:86%; margin-top:.75rem;"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card" style="margin-top:1.25rem;">
+                <div class="card-inner">
+                  <div style="font-weight:900;">Translate</div>
+                  <div class="muted" style="margin-top:.25rem; font-size:.9rem;">Try Hindi or any target language.</div>
+                  <div class="hstack" style="margin-top:1rem;">
+                    <input class="input input-soft" data-translate-lang style="max-width:260px;" placeholder="Hindi" />
+                    <button class="btn btn-secondary btn-sm" data-ripple data-translate type="button">Translate</button>
+                  </div>
+                  <div data-translate-out class="muted" style="margin-top:1rem; line-height:1.7;"></div>
+                </div>
+              </div>
+
+              <div class="card" style="margin-top:1.25rem;">
+                <div class="card-inner">
+                  <div style="font-weight:900;">Suggested visual search</div>
+                  <div class="muted" style="margin-top:.25rem; font-size:.9rem;">Generates an image-search query + visual type for your concept.</div>
+                  <div class="grid" style="grid-template-columns: 1fr 160px; gap:1rem; margin-top:1rem;">
+                    <select class="input input-soft" data-visual-concept></select>
+                    <button class="btn btn-primary btn-sm" data-ripple data-visual-generate type="button">Generate</button>
+                  </div>
+                  <div class="card" style="margin-top:1rem;">
+                    <div class="card-inner">
+                      <div class="muted" style="font-size:.85rem;">Output</div>
+                      <pre data-visual-out class="muted" style="white-space:pre-wrap; margin: .75rem 0 0;">—</pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="grid" style="gap:1.25rem;">
+          <div class="card reveal">
+            <div class="card-inner" data-next>
+              <div class="skeleton" style="height:18px; width:55%;"></div>
+              <div class="skeleton" style="height:14px; width:92%; margin-top:.8rem;"></div>
+              <div class="skeleton" style="height:14px; width:80%; margin-top:.6rem;"></div>
+            </div>
+          </div>
+          <div class="card reveal">
+            <div class="card-inner" data-cog>
+              <div class="skeleton" style="height:18px; width:45%;"></div>
+              <div class="skeleton" style="height:14px; width:86%; margin-top:.8rem;"></div>
+              <div class="skeleton" style="height:24px; width:40%; margin-top:1.25rem; border-radius:999px;"></div>
+            </div>
+          </div>
+          <div class="card reveal">
+            <div class="card-inner">
+              <div style="font-weight:900;">Need help?</div>
+              <div class="muted" style="margin-top:.5rem; line-height:1.7; font-size:.95rem;">AI Tutor overlay lands next. For now, keep building your mastery via quiz + reviews.</div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+{% endblock %}
