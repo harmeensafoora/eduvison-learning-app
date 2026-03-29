@@ -9,6 +9,7 @@ Handles:
 - Task queuing and result caching
 """
 
+import asyncio
 import logging
 import os
 from datetime import datetime
@@ -289,3 +290,65 @@ def enqueue_pdf_processing(
     except Exception as e:
         logger.error(f"Failed to enqueue PDF processing: {str(e)}")
         raise
+
+
+# ============================================================================
+# Task 3.2: Elaboration Prompt Generation
+# ============================================================================
+
+
+@celery_app.task(
+    name="generate_elaboration",
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_kwargs={"max_retries": 2},
+    default_retry_delay=30,
+)
+async def generate_elaboration_async(
+    self,
+    concept_id: str,
+    concept_name: str,
+    concept_summary: str = None,
+    user_id: str = None
+):
+    """
+    Async Celery task for elaboration prompt generation.
+    
+    Runs in background after quiz submission. Result is cached and can be
+    retrieved via /api/elaboration/{concept_id}.
+    
+    Args:
+        concept_id: PDF concept ID
+        concept_name: Concept name for context
+        concept_summary: Optional concept summary
+        user_id: Requesting user ID (for history)
+    
+    Returns:
+        Dict with generation status
+    """
+    try:
+        from app.elaboration import get_elaboration_prompt
+        
+        logger.info(f"Starting elaboration generation for {concept_id}")
+        
+        user_history = None
+        if user_id:
+            # Could fetch user's prior errors here if needed
+            user_history = {}
+        
+        result = await asyncio.wait_for(
+            get_elaboration_prompt(
+                concept_id,
+                concept_name,
+                concept_summary,
+                user_history
+            ),
+            timeout=2.0
+        )
+        
+        logger.info(f"Elaboration generated for {concept_id}")
+        return {"success": True, "concept_id": concept_id, "type": result.get("type")}
+    
+    except Exception as exc:
+        logger.error(f"Elaboration task failed: {exc}")
+        raise self.retry(exc=exc, countdown=30)
