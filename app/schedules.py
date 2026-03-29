@@ -1,35 +1,36 @@
 """
-Spaced Repetition Scheduler - Leitner System Implementation
+Leitner Scheduler Backend - Spaced Repetition State Management (Task 3.1)
 
-Uses evidence-based intervals (Karpicke & Roediger 2007):
-- Box 1: Review in 1 day
-- Box 2: Review in 3 days  
-- Box 3: Review in 7 days
+Evidence-based spaced repetition intervals:
+- Box 1: 1 day (immediate review)
+- Box 2: 3 days (reinforcement)
+- Box 3: 7 days (long-term retention)
 
-After 3 consecutive correct answers, advance to next box.
-Wrong answer resets to Box 1.
+Progression: 3 consecutive correct → advance box
+Failure: 1 incorrect → reset to Box 1
 """
 
 import logging
 from datetime import datetime, timedelta
-from sqlalchemy import select, and_
-from app.database import async_session_factory
+from sqlalchemy import select, and_, func
+from app.database import AsyncSessionLocal
 from app.db_models import SpacedRepState, PDFConcept
 
 logger = logging.getLogger(__name__)
 
-# Leitner intervals: Evidence-based (Karpicke & Roediger 2007)
 LEITNER_INTERVALS = {
-    1: timedelta(days=1),   # Box 1: review tomorrow
-    2: timedelta(days=3),   # Box 2: review in 3 days
-    3: timedelta(days=7),   # Box 3: review in 7 days
+    1: timedelta(days=1),
+    2: timedelta(days=3),
+    3: timedelta(days=7),
 }
+
+STREAK_THRESHOLD = 3
 
 
 async def get_or_create_spaced_rep_state(
     session, user_id: str, concept_id: str
 ) -> SpacedRepState:
-    """Get existing spaced rep state or create new (default box 1)."""
+    """Get existing spaced rep state or create new with box 1."""
     stmt = select(SpacedRepState).where(
         and_(
             SpacedRepState.user_id == user_id,
@@ -37,6 +38,7 @@ async def get_or_create_spaced_rep_state(
         )
     )
     state = await session.scalar(stmt)
+    
     if not state:
         state = SpacedRepState(
             user_id=user_id,
@@ -46,7 +48,9 @@ async def get_or_create_spaced_rep_state(
             next_review_at=datetime.utcnow() + timedelta(days=1),
         )
         session.add(state)
-        await session.flush()  # Ensure ID assigned
+        await session.flush()
+        logger.info(f"Created spaced_rep_state for user {user_id}, concept {concept_id}")
+    
     return state
 
 
@@ -55,80 +59,117 @@ async def schedule_next_review(
 ) -> dict:
     """
     Update spaced rep state after quiz answer.
-    
-    Rules:
-    - Correct answer: increment streak; if streak==3, advance box
-    - Incorrect answer: reset to box 1, streak 0
-    - Next review based on current box (LEITNER_INTERVALS)
-    
-    Returns: {"box": int, "next_review_at": datetime, "streak_correct": int}
+    Handles box progression and scheduling.
     """
-    async with async_session_factory() as session:
-        state = await get_or_create_spaced_rep_state(session, user_id, concept_id)
-        
-        if is_correct:
-            state.streak_correct += 1
-            if state.streak_correct >= 3:  # Ready to advance
-                state.box = min(state.box + 1, 3)  # Cap at box 3
+    try:
+        async with AsyncSessionLocal() as session:
+            state = await get_or_create_spaced_rep_state(session, user_id, concept_id)
+            
+            advanced_box = False
+            
+            if is_correct:
+                state.streak_correct += 1
+                if state.streak_correct >= STREAK_THRESHOLD:
+                    if state.box < 3:
+                        state.box += 1
+                        advanced_box = True
+                        logger.info(
+                            f"Concept {concept_id} advanced from box {state.box - 1} " 
+                            f"to box {state.box} for user {user_id}"
+                        )
+                    state.streak_correct = 0
+            else:
+                state.box = 1
                 state.streak_correct = 0
-        else:
-            state.box = 1
-            state.streak_correct = 0
-        
-        state.last_review_at = datetime.utcnow()
-        state.next_review_at = datetime.utcnow() + LEITNER_INTERVALS[state.box]
-        
-        await session.commit()
-        
-        logger.info(
-            f"Scheduled {concept_id} for user {user_id}: "
-            f"box={state.box}, next={state.next_review_at}, correct={is_correct}"
-        )
-        
+                logger.info(f"Concept {concept_id} reset to box 1 for user {user_id}")
+            
+            state.last_review_at = datetime.utcnow()
+            state.next_review_at = datetime.utcnow() + LEITNER_INTERVALS[state.box]
+            
+            await session.commit()
+            
+            logger.info(
+                f"Scheduled {concept_id} for user {user_id}: "
+                f"box={state.box}, next={state.next_review_at.isoformat()}, "
+                f"correct={is_correct}, streak={state.streak_correct}"
+            )
+            
+            return {
+                "box": state.box,
+                "next_review_at": state.next_review_at,
+                "streak_correct": state.streak_correct,
+                "advanced_box": advanced_box,
+            }
+    
+    except Exception as e:
+        logger.error(f"Error scheduling review: {e}", exc_info=True)
         return {
-            "box": state.box,
-            "next_review_at": state.next_review_at,
-            "streak_correct": state.streak_correct,
+            "box": 1,
+            "next_review_at": datetime.utcnow() + timedelta(days=1),
+            "streak_correct": 0,
+            "advanced_box": False,
         }
 
 
 async def get_user_review_schedule(user_id: str, days_ahead: int = 7) -> list:
-    """
-    Get all concepts due for review in next N days, grouped by due date.
-    Used by dashboard to show "review today", "review this week" cards.
+    """Get all concepts due for review in next N days."""
+    try:
+        async with AsyncSessionLocal() as session:
+            now = datetime.utcnow()
+            future = now + timedelta(days=days_ahead)
+            
+            stmt = (
+                select(SpacedRepState, PDFConcept.name)
+                .join(PDFConcept, SpacedRepState.concept_id == PDFConcept.id)
+                .where(
+                    and_(
+                        SpacedRepState.user_id == user_id,
+                        SpacedRepState.next_review_at >= now,
+                        SpacedRepState.next_review_at <= future,
+                    )
+                )
+                .order_by(SpacedRepState.next_review_at.asc())
+            )
+            
+            results = await session.execute(stmt)
+            rows = results.all()
+            
+            schedule = [
+                {
+                    "concept_id": str(row[0].concept_id),
+                    "name": row[1],
+                    "due_at": row[0].next_review_at,
+                    "box": row[0].box,
+                }
+                for row in rows
+            ]
+            
+            logger.info(f"Retrieved {len(schedule)} scheduled reviews for user {user_id}")
+            return schedule
     
-    Returns: [
-        {"concept_id": "...", "name": "...", "due_at": datetime, "box": int},
-        ...
-    ]
-    Ordered by due_at ascending.
-    """
-    async with async_session_factory() as session:
-        now = datetime.utcnow()
-        future = now + timedelta(days=days_ahead)
-        
-        stmt = (
-            select(SpacedRepState, PDFConcept.name)
-            .join(PDFConcept)
-            .where(
+    except Exception as e:
+        logger.error(f"Error retrieving review schedule: {e}", exc_info=True)
+        return []
+
+
+async def get_reviews_due_today(user_id: str) -> int:
+    """Count concepts due for review today."""
+    try:
+        async with AsyncSessionLocal() as session:
+            now = datetime.utcnow()
+            today_end = now.replace(hour=23, minute=59, second=59)
+            
+            stmt = select(func.count()).select_from(SpacedRepState).where(
                 and_(
                     SpacedRepState.user_id == user_id,
-                    SpacedRepState.next_review_at >= now,
-                    SpacedRepState.next_review_at <= future,
+                    SpacedRepState.next_review_at <= today_end,
+                    SpacedRepState.next_review_at >= now
                 )
             )
-            .order_by(SpacedRepState.next_review_at)
-        )
-        
-        results = await session.execute(stmt)
-        rows = results.all()
-        
-        return [
-            {
-                "concept_id": str(row[0].concept_id),
-                "name": row[1],
-                "due_at": row[0].next_review_at,
-                "box": row[0].box,
-            }
-            for row in rows
-        ]
+            
+            count = await session.scalar(stmt)
+            return count or 0
+    
+    except Exception as e:
+        logger.error(f"Error counting today's reviews: {e}", exc_info=True)
+        return 0
