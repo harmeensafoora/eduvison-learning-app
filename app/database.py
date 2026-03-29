@@ -1,19 +1,25 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
-from sqlalchemy.pool import AsyncAdaptedQueuePool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, StaticPool
 from .config import DATABASE_URL
 
 # PostgreSQL connection pooling: pool_size=20, max_overflow=10
 # For SQLite, use single-queue pool
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    future=True,
-    pool_size=20,
-    max_overflow=10,
-    poolclass=AsyncAdaptedQueuePool if "postgresql" in DATABASE_URL else None,
-)
+engine_kwargs = {
+    "echo": False,
+    "future": True,
+}
+
+if "sqlite" in DATABASE_URL:
+    # SQLite doesn't support pool_size/max_overflow
+    engine_kwargs["poolclass"] = StaticPool
+else:
+    engine_kwargs["pool_size"] = 20
+    engine_kwargs["max_overflow"] = 10
+    engine_kwargs["poolclass"] = AsyncAdaptedQueuePool
+
+engine = create_async_engine(DATABASE_URL, **engine_kwargs)
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

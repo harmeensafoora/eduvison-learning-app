@@ -224,3 +224,23 @@ class Feedback(Base):
     feedback_text = Column(Text, nullable=False)
     source_citation = Column(String(255), nullable=True)  # "page 12, section 'Light Reactions'"
     generated_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ============================================================================
+# Phase 2: Spaced Repetition & Learning Science Models
+# ============================================================================
+
+
+class SpacedRepState(Base):
+    """Spaced repetition state tracking for Leitner scheduler (Task 3.1)."""
+    __tablename__ = "spaced_rep_state"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    concept_id = Column(String, ForeignKey("pdf_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
+    box = Column(Integer, nullable=False, default=1)  # 1, 2, 3 (Leitner boxes)
+    streak_correct = Column(Integer, nullable=False, default=0)  # 0-3 (reset on wrong answer)
+    last_review_at = Column(DateTime, nullable=True)
+    next_review_at = Column(DateTime, nullable=True, index=True)  # Indexed for "due today" queries
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
