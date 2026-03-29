@@ -16,3 +16,4 @@ httpx
 pydantic[email]
 redis[asyncio]
 tenacity==8.2.3
+celery==5.3.4

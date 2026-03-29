@@ -1,3 +1,4 @@
+import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QuestionCard } from './QuestionCard';
 import { useQuizState } from '../hooks/useQuizState';
