@@ -151,6 +151,8 @@ class PDFUpload(Base):
     file_path = Column(String(512), nullable=False)
     status = Column(String(50), nullable=False, default="uploading")  # uploading, processing, complete, error
     concepts_count = Column(Integer, nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     processing_started = Column(DateTime, nullable=True)
     processing_completed = Column(DateTime, nullable=True)

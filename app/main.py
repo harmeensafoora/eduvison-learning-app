@@ -20,6 +20,8 @@ from .auth_utils import create_access_token, create_refresh_token, decode_token,
 from .cache import init_redis, close_redis, redis_health_check
 from .csrf_middleware import CSRFProtectionMiddleware
 from .llm_pipelines import extract_concepts, generate_quiz_questions, generate_feedback
+from .pdf_processing import validate_pdf_file, save_pdf_file, extract_pdf_text, get_pdf_status
+from .tasks import enqueue_pdf_processing
 from .config import (
     BASE_UPLOAD_DIR,
     FRONTEND_ORIGIN,
@@ -42,6 +44,7 @@ from .db_models import (
     TopicProgress,
     RefreshToken,
     EmailToken,
+    PDFUpload,
 )
 from .pdf_utils import save_upload, extract_text, extract_images
 from .quiz_engine import generate_quiz_from_content, evaluate_answer, generate_check_questions_from_summary
@@ -1478,6 +1481,296 @@ async def api_generate_feedback(
         # Validate parameters
         if not question_text or len(question_text) < 5:
             raise HTTPException(status_code=400, detail="question_text required and must be at least 5 characters")
+
+        if user_knowledge_level not in ["beginner", "intermediate", "advanced"]:
+            user_knowledge_level = "intermediate"
+
+        # Check Azure OpenAI configuration
+        if not os.getenv("AZURE_OPENAI_API_KEY"):
+            raise HTTPException(
+                status_code=400,
+                detail="Azure OpenAI not configured. Set AZURE_OPENAI_API_KEY environment variable.",
+            )
+
+        # Generate feedback using LLM
+        feedback = await generate_feedback(
+            concept_name=concept_name,
+            question_text=question_text,
+            user_answer=user_answer,
+            correct_answer=correct_answer,
+            is_correct=is_correct,
+            explanation=explanation,
+            user_knowledge_level=user_knowledge_level,
+        )
+
+        return {
+            **feedback,
+            "response_id": response_id,
+            "generation_timestamp": datetime.utcnow().isoformat(),
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Feedback generation failed for response {response_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate feedback")
+
+
+# ==================== PDF UPLOAD & PROCESSING ====================
+
+
+@app.post("/api/pdfs/upload")
+async def upload_pdf(
+    file: UploadFile = File(...),
+    title: str = Form(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user_verified_required),
+) -> dict[str, Any]:
+    """
+    Upload and process PDF for learning content extraction
+
+    Args:
+        file: PDF file to upload (multipart form data)
+        title: Optional document title for context
+        db: Database session
+        user: Authenticated user (must have verified email)
+
+    Returns:
+        Dict with:
+        - pdf_id: Unique PDF identifier
+        - status: Current processing status (uploading)
+        - task_id: Celery task ID for tracking async processing
+        - file_size_mb: Size of uploaded file
+        - filename: Original filename
+        - upload_timestamp: ISO timestamp
+
+    Validates:
+    - File is a valid PDF document
+    - File size is within limits (≤50MB)
+    - PDF is not encrypted
+    - PDF has content to extract
+
+    Side Effects:
+    - Saves PDF to disk (uploads/{user_id}/)
+    - Creates PDFUpload record in database
+    - Enqueues async concept extraction task
+
+    Raises:
+        HTTPException: 400 if file validation fails
+        HTTPException: 413 if file is too large
+        HTTPException: 500 if save/processing fails
+    """
+    try:
+        # Read file content
+        file_content = await file.read()
+
+        # Validate PDF file
+        is_valid, error_msg = await validate_pdf_file(
+            filename=file.filename,
+            file_content=file_content,
+        )
+
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
+
+        # Save PDF file to disk
+        file_path, file_id = await save_pdf_file(
+            file_content=file_content,
+            original_filename=file.filename,
+            user_id=user.id,
+        )
+
+        # Create database record
+        pdf_record = PDFUpload(
+            id=file_id,
+            user_id=user.id,
+            filename=file.filename,
+            file_path=file_path,
+            file_size_bytes=len(file_content),
+            status="uploading",
+            created_at=datetime.utcnow(),
+            title=title,
+        )
+        db.add(pdf_record)
+        await db.flush()
+        await db.commit()
+
+        # Enqueue async processing task
+        task_id = enqueue_pdf_processing(
+            pdf_id=file_id,
+            file_path=file_path,
+            user_id=user.id,
+            title=title or file.filename,
+        )
+
+        logger.info(f"PDF uploaded: {file_id} (size: {len(file_content)} bytes, task_id: {task_id})")
+
+        return {
+            "pdf_id": file_id,
+            "status": "uploading",
+            "task_id": task_id,
+            "file_size_mb": round(len(file_content) / (1024 * 1024), 2),
+            "filename": file.filename,
+            "upload_timestamp": datetime.utcnow().isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PDF upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to upload PDF")
+
+
+@app.get("/api/pdfs/{pdf_id}/status")
+async def get_pdf_processing_status(
+    pdf_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user_verified_required),
+) -> dict[str, Any]:
+    """
+    Get current processing status of a PDF
+
+    Args:
+        pdf_id: Unique PDF identifier
+        db: Database session
+        user: Authenticated user (must own the PDF)
+
+    Returns:
+        Dict with:
+        - pdf_id: The PDF ID
+        - status: Processing status (uploading/processing/complete/error)
+        - concepts_count: Number of extracted concepts
+        - error_message: Error details if status is 'error'
+        - processing_time_ms: Time spent processing
+        - created_at: When PDF was uploaded
+        - completed_at: When processing finished (if complete)
+        - metadata: PDF metadata (page count, char count, images, tables)
+
+    Status Transitions:
+    1. uploading → Waiting for async processing to start
+    2. processing → Extracting concepts from PDF text
+    3. complete → Concepts extracted successfully
+    4. error → Processing failed, see error_message
+
+    Raises:
+        HTTPException: 404 if PDF not found or doesn't belong to user
+        HTTPException: 500 if database query fails
+    """
+    try:
+        status = await get_pdf_status(
+            db=db,
+            pdf_id=pdf_id,
+            user_id=user.id,
+        )
+
+        return status
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to get PDF status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve PDF status")
+
+
+@app.get("/api/pdfs")
+async def list_user_pdfs(
+    skip: int = 0,
+    limit: int = 20,
+    status: str = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user_verified_required),
+) -> dict[str, Any]:
+    """
+    List all PDFs uploaded by authenticated user
+
+    Args:
+        skip: Number of results to skip (pagination)
+        limit: Maximum results to return (max 100)
+        status: Optional filter by status (uploading/processing/complete/error)
+        db: Database session
+        user: Authenticated user
+
+    Returns:
+        Dict with:
+        - pdfs: List of PDF metadata dicts
+        - total: Total PDFs matching filter
+        - skip: Pagination offset used
+        - limit: Pagination limit used
+
+    Each PDF dict contains:
+    - pdf_id: The PDF ID
+    - filename: Original filename
+    - status: Current processing status
+    - concepts_count: Number of extracted concepts
+    - file_size_mb: Size of uploaded file
+    - created_at: Upload timestamp
+    - completed_at: Processing completion timestamp (if complete)
+    - error_message: Error details (if failed)
+
+    Query Examples:
+    - GET /api/pdfs → All PDFs for user
+    - GET /api/pdfs?status=complete → Only processed PDFs
+    - GET /api/pdfs?skip=20&limit=10 → Pagination
+
+    Raises:
+        HTTPException: 400 if invalid parameters
+        HTTPException: 500 if database query fails
+    """
+    try:
+        # Validate pagination parameters
+        limit = min(limit, 100)  # Cap at 100 results
+        if skip < 0 or limit < 1:
+            raise HTTPException(status_code=400, detail="Invalid pagination parameters")
+
+        # Build query
+        stmt = select(PDFUpload).where(PDFUpload.user_id == user.id)
+
+        # Apply status filter if provided
+        if status:
+            valid_statuses = ["uploading", "processing", "complete", "error"]
+            if status not in valid_statuses:
+                raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+            stmt = stmt.where(PDFUpload.status == status)
+
+        # Get total count
+        count_stmt = select(func.count(PDFUpload.id)).where(PDFUpload.user_id == user.id)
+        if status:
+            count_stmt = count_stmt.where(PDFUpload.status == status)
+
+        total = (await db.execute(count_stmt)).scalar() or 0
+
+        # Get paginated results
+        stmt = stmt.order_by(PDFUpload.created_at.desc()).offset(skip).limit(limit)
+        results = (await db.execute(stmt)).scalars().all()
+
+        pdfs = []
+        for pdf in results:
+            pdfs.append(
+                {
+                    "pdf_id": pdf.id,
+                    "filename": pdf.filename,
+                    "title": pdf.title,
+                    "status": pdf.status,
+                    "concepts_count": pdf.concepts_count or 0,
+                    "file_size_mb": round(pdf.file_size_bytes / (1024 * 1024), 2) if pdf.file_size_bytes else 0,
+                    "created_at": pdf.created_at.isoformat(),
+                    "completed_at": pdf.completed_at.isoformat() if pdf.completed_at else None,
+                    "error_message": pdf.error_message,
+                }
+            )
+
+        return {
+            "pdfs": pdfs,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list PDFs: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve PDFs")
 
         if user_knowledge_level not in ["beginner", "intermediate", "advanced"]:
             user_knowledge_level = "intermediate"
