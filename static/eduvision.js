@@ -68,9 +68,17 @@
     return new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms));
   }
 
+  function getCsrfToken() {
+    const match = document.cookie.match(/(?:^|;\s*)eduvision_csrf=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : "";
+  }
+
   async function apiFetch(url, options = {}, ms = 15000) {
+    const csrfToken = getCsrfToken();
+    const { headers: optHeaders, ...restOptions } = options;
+    const mergedHeaders = { Accept: "application/json", ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}), ...(optHeaders || {}) };
     const res = await Promise.race([
-      fetch(url, { headers: { Accept: "application/json", ...(options.headers || {}) }, credentials: "include", ...options }),
+      fetch(url, { headers: mergedHeaders, credentials: "include", ...restOptions }),
       timeout(ms),
     ]);
     const data = await res.json().catch(() => ({}));
@@ -684,6 +692,7 @@
     const quizConceptSel = $("[data-quiz-concept]");
     const quizDiffSel = $("[data-quiz-diff]");
     const quizTypeSel = $("[data-quiz-type]");
+    const quizCountSel = $("[data-quiz-count]");
     const quizGenerateBtn = $("[data-quiz-generate]");
     const quizStatus = $("[data-quiz-status]");
     const quizQuestion = $("[data-quiz-question]");
@@ -865,80 +874,83 @@
         }
       }
 
-      if (quizGenerateBtn) {
-        quizGenerateBtn.addEventListener("click", async () => {
-          const chunkId = quizConceptSel?.value || "";
-          const difficulty = quizDiffSel?.value || "medium";
-          const questionType = (quizTypeSel?.value || "").trim() || null;
-          if (!chunkId) return toast.info("Pick a concept first.");
-          currentChunkId = chunkId;
-          currentDifficulty = difficulty;
-          questionStart = Date.now();
-          if (quizStatus) quizStatus.textContent = "Generating…";
-          if (quizQuestion) quizQuestion.textContent = "—";
-          if (quizFeedback) quizFeedback.textContent = "";
-          if (quizScore) quizScore.style.display = "none";
-          if (quizAnswer) quizAnswer.value = "";
-          if (quizOptions) {
-            quizOptions.style.display = "none";
-            quizOptions.innerHTML = "";
-          }
-          const answerField = quizAnswer?.closest(".field");
-          if (answerField) answerField.style.display = "";
-          try {
-            quizGenerateBtn.disabled = true;
-            const res = await apiFetch("/api/generate-quiz", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ chunk_id: chunkId, difficulty, question_type: questionType }),
-            }, 45000);
-            const payload = res.question && typeof res.question === "object" ? res.question : null;
-            const qText = payload?.question ? String(payload.question) : String(res.question || "Question generated.");
-            if (quizQuestion) quizQuestion.textContent = qText;
-            const format = String(payload?.format || "");
-            const options = Array.isArray(payload?.options) ? payload.options : [];
+      let quizRemaining = 0;
 
-            if ((format === "multiple_choice" || questionType === "mcq") && options.length && quizOptions) {
-              quizOptions.style.display = "grid";
-              quizOptions.innerHTML = "";
-              const answerField2 = quizAnswer?.closest(".field");
-              if (answerField2) answerField2.style.display = "none";
-              for (const opt of options.slice(0, 4)) {
-                const b = document.createElement("button");
-                b.type = "button";
-                b.className = "btn btn-secondary btn-sm";
-                b.setAttribute("data-ripple", "true");
-                b.textContent = String(opt);
-                b.addEventListener("click", () => {
-                  if (quizAnswer) quizAnswer.value = String(opt);
-                  Array.from(quizOptions.querySelectorAll("button")).forEach((x) => (x.style.outline = "none"));
-                  b.style.outline = "2px solid var(--ink)";
-                  b.style.outlineOffset = "2px";
-                });
-                quizOptions.appendChild(b);
-              }
-            } else {
-              const answerField3 = quizAnswer?.closest(".field");
-              if (answerField3) answerField3.style.display = "";
-              if (quizAnswer) {
-                if (format === "one_word" || questionType === "one_word") quizAnswer.placeholder = "One word…";
-                else if (format === "one_sentence" || questionType === "one_sentence") quizAnswer.placeholder = "One sentence…";
-                else if (format === "fill_blank" || questionType === "fill_blank") quizAnswer.placeholder = "Fill the blank…";
-                else quizAnswer.placeholder = "Type your answer…";
-              }
+      async function doGenerateQuiz() {
+        const chunkId = quizConceptSel?.value || "";
+        const difficulty = quizDiffSel?.value || "medium";
+        const questionType = (quizTypeSel?.value || "").trim() || null;
+        if (!chunkId) return toast.info("Pick a concept first.");
+        currentChunkId = chunkId;
+        currentDifficulty = difficulty;
+        questionStart = Date.now();
+        if (quizStatus) quizStatus.textContent = quizRemaining > 0 ? `Generating… (${quizRemaining} left)` : "Generating…";
+        if (quizQuestion) quizQuestion.textContent = "—";
+        if (quizFeedback) quizFeedback.textContent = "";
+        if (quizScore) quizScore.style.display = "none";
+        if (quizAnswer) quizAnswer.value = "";
+        if (quizOptions) { quizOptions.style.display = "none"; quizOptions.innerHTML = ""; }
+        const answerField = quizAnswer?.closest(".field");
+        if (answerField) answerField.style.display = "";
+        try {
+          if (quizGenerateBtn) quizGenerateBtn.disabled = true;
+          const res = await apiFetch("/api/generate-quiz", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chunk_id: chunkId, difficulty, question_type: questionType }),
+          }, 45000);
+          const payload = res.question && typeof res.question === "object" ? res.question : null;
+          const qText = payload?.question ? String(payload.question) : String(res.question || "Question generated.");
+          if (quizQuestion) quizQuestion.textContent = qText;
+          const format = String(payload?.format || "");
+          const options = Array.isArray(payload?.options) ? payload.options : [];
+          if ((format === "multiple_choice" || questionType === "mcq") && options.length && quizOptions) {
+            quizOptions.style.display = "grid";
+            quizOptions.innerHTML = "";
+            const af = quizAnswer?.closest(".field");
+            if (af) af.style.display = "none";
+            for (const opt of options.slice(0, 4)) {
+              const b = document.createElement("button");
+              b.type = "button";
+              b.className = "btn btn-secondary btn-sm";
+              b.setAttribute("data-ripple", "true");
+              b.textContent = String(opt);
+              b.addEventListener("click", () => {
+                if (quizAnswer) quizAnswer.value = String(opt);
+                Array.from(quizOptions.querySelectorAll("button")).forEach((x) => (x.style.outline = "none"));
+                b.style.outline = "2px solid var(--ink)";
+                b.style.outlineOffset = "2px";
+              });
+              quizOptions.appendChild(b);
             }
-            if (quizStatus) quizStatus.textContent = "";
-            void apiFetch("/api/track-event", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ session_id: sessionId, chunk_id: chunkId, event_type: "quiz_generate", payload: { difficulty, question_type: questionType } }),
-            }).catch(() => {});
-          } catch (err) {
-            toast.error(err.message || "Failed to generate.");
-            if (quizStatus) quizStatus.textContent = "Failed to generate.";
-          } finally {
-            quizGenerateBtn.disabled = false;
+          } else {
+            const af = quizAnswer?.closest(".field");
+            if (af) af.style.display = "";
+            if (quizAnswer) {
+              if (format === "one_word" || questionType === "one_word") quizAnswer.placeholder = "One word…";
+              else if (format === "one_sentence" || questionType === "one_sentence") quizAnswer.placeholder = "One sentence…";
+              else if (format === "fill_blank" || questionType === "fill_blank") quizAnswer.placeholder = "Fill the blank…";
+              else quizAnswer.placeholder = "Type your answer…";
+            }
           }
+          if (quizStatus) quizStatus.textContent = "";
+          void apiFetch("/api/track-event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId, chunk_id: chunkId, event_type: "quiz_generate", payload: { difficulty, question_type: questionType } }),
+          }).catch(() => {});
+        } catch (err) {
+          toast.error(err.message || "Failed to generate.");
+          if (quizStatus) quizStatus.textContent = "Failed to generate.";
+        } finally {
+          if (quizGenerateBtn) quizGenerateBtn.disabled = false;
+        }
+      }
+
+      if (quizGenerateBtn) {
+        quizGenerateBtn.addEventListener("click", () => {
+          quizRemaining = parseInt(quizCountSel?.value || "1", 10) - 1;
+          doGenerateQuiz();
         });
       }
 
@@ -971,8 +983,6 @@
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ session_id: sessionId, chunk_id: chunkId, event_type: "quiz_submit", payload: { score: res.score, difficulty, time_taken_ms: timeTaken, question_type: questionType } }),
             }).catch(() => {});
-
-            // Refresh mastery bar.
             try {
               const updated = await apiFetch(`/api/session/${encodeURIComponent(sessionId)}`);
               cachedSession = updated.session || cachedSession;
@@ -980,8 +990,10 @@
               const avg = concepts.length ? Math.round(concepts.reduce((a, c) => a + (c.score || 0), 0) / concepts.length) : 0;
               if (masteryLabel) masteryLabel.textContent = `${avg}%`;
               if (masteryBar) masteryBar.style.width = `${avg}%`;
-            } catch {
-              // ignore
+            } catch { /* ignore */ }
+            if (quizRemaining > 0) {
+              quizRemaining--;
+              setTimeout(() => doGenerateQuiz(), 800);
             }
           } catch (err) {
             toast.error(err.message || "Could not submit.");

@@ -2,7 +2,7 @@ from pydantic import BaseModel, field_validator
 from typing import Any
 import re
 
-_EMAIL_RE = re.compile(r"^[^@\\s]+@[^@\\s]+(\\.[^@\\s]+)*$")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+(\.[^@\s]+)*$")
 
 
 def _email_basic(value: str) -> str:

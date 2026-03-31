@@ -1,4 +1,14 @@
 {
+  "permissions": {
+    "allow": [
+      "Skill(gsd:verify-work)",
+      "Skill(gsd:verify-work:*)",
+      "Bash(Get-Service)",
+      "Bash(Where-Object { $_ame -like \"*postgres*\" -or $_isplayName -like \"*postgres*\" })",
+      "Bash(Select-Object Name, DisplayName, Status)",
+      "Bash(sc query:*)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {

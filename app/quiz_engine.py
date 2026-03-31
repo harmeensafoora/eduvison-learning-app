@@ -76,13 +76,14 @@ async def generate_quiz_from_content(content: str, difficulty: str, question_typ
     elif qt == "mcq":
         type_rules = "Format: multiple_choice. Provide exactly 4 options.\n"
 
+    if qt:
+        difficulty_guide = ""
+    else:
+        difficulty_guide = "easy: multiple choice, 4 options.\nmedium: short answer, application.\nhard: open-ended, unfamiliar context.\n"
+
     prompt = f"""Generate a {difficulty} recall question for this concept: {content}
 
-easy: single fact, multiple choice, 4 options.
-medium: short answer, application of concept.
-hard: transfer question, unfamiliar context, open-ended.
-{type_rules}
-
+{difficulty_guide}{type_rules}
 Return JSON only:
 {{"question":"", "format":"multiple_choice|short_answer|open_ended|one_word|one_sentence|fill_blank", "options":[], "correct_answer":"", "explanation":""}}"""
     return await azure_json(

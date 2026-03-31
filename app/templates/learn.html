@@ -76,15 +76,26 @@
                     </div>
                   </div>
 
-                  <div class="field" style="margin-top:1rem;">
-                    <label class="label" for="type_sel">Question type</label>
-                    <select class="input" id="type_sel" data-quiz-type>
-                      <option value="" selected>Auto</option>
-                      <option value="one_word">One word</option>
-                      <option value="one_sentence">One sentence</option>
-                      <option value="fill_blank">Fill in the blanks</option>
-                      <option value="mcq">MCQ</option>
-                    </select>
+                  <div style="display:flex; gap:1rem; margin-top:1rem;">
+                    <div class="field" style="flex:1;">
+                      <label class="label" for="type_sel">Question type</label>
+                      <select class="input" id="type_sel" data-quiz-type>
+                        <option value="" selected>Auto</option>
+                        <option value="one_word">One word</option>
+                        <option value="one_sentence">One sentence</option>
+                        <option value="fill_blank">Fill in the blanks</option>
+                        <option value="mcq">MCQ</option>
+                      </select>
+                    </div>
+                    <div class="field" style="flex:1;">
+                      <label class="label" for="count_sel">Questions</label>
+                      <select class="input" id="count_sel" data-quiz-count>
+                        <option value="1" selected>1</option>
+                        <option value="3">3</option>
+                        <option value="5">5</option>
+                        <option value="10">10</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div style="margin-top:1.25rem;" class="hstack">

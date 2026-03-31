@@ -22,6 +22,9 @@ else:
 engine = create_async_engine(DATABASE_URL, **engine_kwargs)
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+# Alias for backward compatibility (used by schedules.py)
+AsyncSessionLocal = async_session_factory
+
 
 class Base(DeclarativeBase):
     pass

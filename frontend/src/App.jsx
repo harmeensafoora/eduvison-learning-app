@@ -1,5 +1,9 @@
-import { useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { Dashboard } from './pages/Dashboard';
+import { Upload } from './pages/Upload';
+import { Analytics } from './pages/Analytics';
+import { Learn } from './pages/Learn';
 import { Quiz } from './components/Quiz';
 
 /**
@@ -7,10 +11,32 @@ import { Quiz } from './components/Quiz';
  * Routes between different pages and manages app state
  */
 export default function App() {
-  const [currentPage, setCurrentPage] = useState('quiz');
-  const [selectedQuizId] = useState('quiz-001'); // Would come from URL param or route
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Redirect root to dashboard */}
+        <Route path="/" element={<Navigate to="/dashboard" />} />
+        
+        {/* Main application routes */}
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/upload" element={<Upload />} />
+        <Route path="/analytics" element={<Analytics />} />
+        <Route path="/learn/:sessionId" element={<Learn />} />
+        
+        {/* Demo/Dev route for testing quiz component */}
+        <Route path="/demo/quiz" element={<DemoQuiz />} />
+        
+        {/* Catch-all redirect */}
+        <Route path="*" element={<Navigate to="/dashboard" />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
 
-  // Sample quiz data for development
+/**
+ * Demo quiz component for development/testing
+ */
+function DemoQuiz() {
   const sampleQuiz = {
     id: 'quiz-001',
     conceptId: 'concept-001',
@@ -103,9 +129,7 @@ export default function App() {
         maxWidth: '1200px',
         margin: '0 auto',
       }}>
-        {currentPage === 'quiz' && (
-          <Quiz quizId={selectedQuizId} quizData={sampleQuiz} />
-        )}
+        <Quiz quizId={sampleQuiz.id} quizData={sampleQuiz} />
       </div>
 
       {/* Footer */}

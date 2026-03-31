@@ -140,7 +140,7 @@ def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie("eduvision_csrf", path="/")
 
 
-async def get_current_user_optional(request: Request, db: AsyncSession) -> User | None:
+async def get_current_user_optional(request: Request, db: AsyncSession = Depends(get_db)) -> User | None:
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         return None
@@ -153,14 +153,14 @@ async def get_current_user_optional(request: Request, db: AsyncSession) -> User 
     return await db.get(User, user_id)
 
 
-async def get_current_user_required(request: Request, db: AsyncSession) -> User:
+async def get_current_user_required(request: Request, db: AsyncSession = Depends(get_db)) -> User:
     user = await get_current_user_optional(request, db)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     return user
 
 
-async def get_current_user_verified_required(request: Request, db: AsyncSession) -> User:
+async def get_current_user_verified_required(request: Request, db: AsyncSession = Depends(get_db)) -> User:
     user = await get_current_user_required(request, db)
     if not user.email_verified_at:
         raise HTTPException(status_code=403, detail="Email not verified")
@@ -911,7 +911,7 @@ async def process_document(
     session_id = str(uuid.uuid4())
     pdf_path = save_upload(file.filename, contents)
     text = extract_text(pdf_path)
-    summary = await summarize_text(text, max_sections=8)
+    summary = await summarize_text(text, max_sections=4)
     image_paths = extract_images(pdf_path, session_id)
 
     large_image_paths = []
